@@ -179,7 +179,6 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     const roomId = crypto.randomUUID().slice(0, 8);
     roomRef.current = { id: roomId, name: roomName, peers: [] };
 
-    await acquireMedia();
     setPhase("gathering");
     setGatherError("");
 
@@ -248,8 +247,6 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       if (payload.type !== "offer") throw new Error("Expected an invite code.");
 
       roomRef.current = { id: payload.roomId, name: payload.roomName, peers: [{ id: payload.fromId, name: payload.fromName }] };
-
-      await acquireMedia();
 
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       const { sdp, candidates } = await gatherCandidates(pc, "answer", payload.sdp);

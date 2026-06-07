@@ -1,5 +1,4 @@
 import { registerModule } from "../core/moduleRegistry";
-import VideoModule from "./videochat/VideoModule";
 import ChatModule from "./chat/ChatModule";
 import CollabModule from "./collab/CollabModule";
 import WatchPartyModule from "./watchparty/WatchPartyModule";
@@ -9,14 +8,6 @@ import WhiteboardModule from "./whiteboard/WhiteboardModule";
 // ─── Register all built-in modules ───────────────────────────────────────────
 // To add a new module: import its component and call registerModule() here.
 // To remove a module: delete its registerModule() call.
-
-registerModule({
-  id: "video",
-  label: "Video Chat",
-  icon: "🎥",
-  description: "Live video & audio with screen sharing",
-  component: VideoModule,
-});
 
 registerModule({
   id: "chat",
