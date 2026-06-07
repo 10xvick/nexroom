@@ -1,7 +1,24 @@
 import { useState } from "react";
 import { useWebRTC } from "../core/WebRTCContext";
 import { useSocket } from "../core/SocketContext";
-import { Copy, Plus, LogIn, Settings, Wifi, WifiOff } from "lucide-react";
+import { Copy, Plus, LogIn, Settings, Wifi, WifiOff, Terminal, ChevronDown, ChevronUp } from "lucide-react";
+
+function CopyCmd({ cmd }: { cmd: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <div className="flex items-center justify-between bg-black/40 rounded-lg px-3 py-2 font-mono text-xs text-green-400 gap-2">
+      <span className="truncate">{cmd}</span>
+      <button onClick={copy} className="shrink-0 text-muted hover:text-white transition-colors">
+        {copied ? "✓" : <Copy size={12} />}
+      </button>
+    </div>
+  );
+}
 
 export default function Lobby() {
   const { joinRoom } = useWebRTC();
@@ -11,8 +28,9 @@ export default function Lobby() {
   const [roomId, setRoomId] = useState("");
   const [roomName, setRoomName] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showSetup, setShowSetup] = useState(true);
   const [serverInput, setServerInput] = useState(serverUrl);
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
 
   function saveSettings() {
     setServerUrl(serverInput);
@@ -32,10 +50,10 @@ export default function Lobby() {
     joinRoom(id, roomName.trim() || `${name.trim()}'s Room`, name.trim());
   }
 
-  function copyLink() {
+  function copyRoomId() {
     navigator.clipboard.writeText(roomId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
   }
 
   return (
@@ -48,24 +66,26 @@ export default function Lobby() {
 
       <div className="relative w-full max-w-md">
         {/* Header */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <div className="text-5xl mb-3">⬡</div>
           <h1 className="text-3xl font-bold text-white tracking-tight">nexroom</h1>
           <p className="text-muted text-sm mt-1">peer-to-peer collaboration, no clouds</p>
         </div>
 
-        {/* Status */}
-        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg mb-4 ${connected ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
+        {/* Server status pill */}
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg mb-3 ${connected ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
           {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
-          {connected ? `Signaling connected → ${serverUrl}` : `Signaling offline — start server at ${serverUrl}`}
-          <button className="ml-auto hover:opacity-70" onClick={() => setShowSettings(true)}>
+          <span className="flex-1">
+            {connected ? `Signaling server connected — ${serverUrl}` : "Signaling server not running"}
+          </span>
+          <button className="hover:opacity-70 ml-1" onClick={() => setShowSettings(!showSettings)} title="Change server URL">
             <Settings size={12} />
           </button>
         </div>
 
-        {/* Settings overlay */}
+        {/* Settings panel */}
         {showSettings && (
-          <div className="glass rounded-xl p-4 mb-4 space-y-3">
+          <div className="glass rounded-xl p-4 mb-3 space-y-3">
             <p className="text-sm font-medium text-white">Signaling Server URL</p>
             <input
               type="url"
@@ -74,7 +94,6 @@ export default function Lobby() {
               onChange={(e) => setServerInput(e.target.value)}
               placeholder="http://localhost:4000"
             />
-            <p className="text-xs text-muted">Run locally: <code className="bg-surface px-1 rounded">cd server && npm i && npm run dev</code></p>
             <div className="flex gap-2">
               <button className="btn-primary flex-1 justify-center" onClick={saveSettings}>Save</button>
               <button className="btn-ghost" onClick={() => setShowSettings(false)}>Cancel</button>
@@ -82,7 +101,53 @@ export default function Lobby() {
           </div>
         )}
 
-        {/* Card */}
+        {/* Setup guide — shown when offline */}
+        {!connected && (
+          <div className="glass rounded-xl mb-4 overflow-hidden border-danger/20">
+            <button
+              className="w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-white hover:bg-white/5 transition-colors"
+              onClick={() => setShowSetup(!showSetup)}
+            >
+              <Terminal size={14} className="text-accent" />
+              How to start the signaling server
+              <span className="ml-auto text-muted">{showSetup ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+            </button>
+
+            {showSetup && (
+              <div className="px-4 pb-4 space-y-3 border-t border-border">
+                <p className="text-xs text-muted pt-3">
+                  nexroom needs a tiny local server just for the initial WebRTC handshake. After peers connect, all data goes directly peer-to-peer.
+                </p>
+
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted font-medium">1. Clone the repo</p>
+                  <CopyCmd cmd="git clone https://github.com/10xvick/nexroom.git" />
+                </div>
+
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted font-medium">2. Start the server</p>
+                  <CopyCmd cmd="cd nexroom/server && npm install && npm run dev" />
+                </div>
+
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted font-medium">3. Open this page — it will connect automatically</p>
+                  <p className="text-xs text-muted/60">Server runs on <code className="bg-surface px-1 rounded">http://localhost:4000</code> by default</p>
+                </div>
+
+                <a
+                  href="https://github.com/10xvick/nexroom"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-accent hover:underline mt-1"
+                >
+                  View on GitHub →
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Main card */}
         <div className="glass rounded-2xl p-6 space-y-4">
           {/* Name */}
           <div>
@@ -112,7 +177,8 @@ export default function Lobby() {
             <button
               className="btn-primary w-full justify-center"
               onClick={handleCreate}
-              disabled={!name.trim()}
+              disabled={!name.trim() || !connected}
+              title={!connected ? "Start the signaling server first" : ""}
             >
               <Plus size={16} /> Create Room
             </button>
@@ -137,19 +203,26 @@ export default function Lobby() {
                 onKeyDown={(e) => e.key === "Enter" && handleJoin()}
               />
               {roomId && (
-                <button className="btn-ghost px-3" onClick={copyLink} title="Copy ID">
-                  {copied ? "✓" : <Copy size={14} />}
+                <button className="btn-ghost px-3" onClick={copyRoomId} title="Copy ID">
+                  {copiedId ? "✓" : <Copy size={14} />}
                 </button>
               )}
             </div>
             <button
               className="btn-ghost w-full justify-center border-accent/30 text-accent hover:bg-accent/10"
               onClick={handleJoin}
-              disabled={!name.trim() || !roomId.trim()}
+              disabled={!name.trim() || !roomId.trim() || !connected}
+              title={!connected ? "Start the signaling server first" : ""}
             >
               <LogIn size={16} /> Join Room
             </button>
           </div>
+
+          {!connected && (
+            <p className="text-xs text-danger/70 text-center">
+              Start the signaling server to create or join rooms
+            </p>
+          )}
         </div>
 
         <p className="text-center text-xs text-muted/50 mt-6">
