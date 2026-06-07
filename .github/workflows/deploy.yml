@@ -5,25 +5,32 @@ on:
     branches: [main]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout nexroom source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: "npm"
           cache-dependency-path: client/package-lock.json
 
+      - name: Upgrade npm
+        run: npm install -g npm@11
+
       - name: Install client dependencies
-        run: npm ci
+        run: npm install
         working-directory: client
 
       - name: Build
@@ -31,23 +38,31 @@ jobs:
         working-directory: client
 
       - name: Checkout 10xvick.github.io
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: 10xvick/10xvick.github.io
           token: ${{ secrets.GH_PAGES_DEPLOY_PAT }}
           path: pages-repo
 
-      - name: Copy build output
-        run: |
-          mkdir -p pages-repo/tools/social/nexroom
-          rm -rf pages-repo/tools/social/nexroom/*
-          cp -r client/dist/. pages-repo/tools/social/nexroom/
+      - name: Create deployment directory
+        run: mkdir -p pages-repo/tools/social/nexroom
 
-      - name: Commit and push
+      - name: Copy built files
+        run: cp -r client/dist/. pages-repo/tools/social/nexroom/
+
+      - name: Configure git
+        working-directory: pages-repo
         run: |
-          cd pages-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push
+        working-directory: pages-repo
+        run: |
           git add tools/social/nexroom
-          git diff --cached --quiet || git commit -m "chore: deploy nexroom [$(date -u +'%Y-%m-%dT%H:%M:%SZ')]"
-          git push
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Deploy nexroom build"
+            git push
+          fi
