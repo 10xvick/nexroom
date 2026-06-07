@@ -2,34 +2,59 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { ModuleEventEnvelope, PeerConnection, Room } from "./types";
-import { useSocket, useSocketEvent } from "./SocketContext";
+import {
+  ICE_SERVERS,
+  encodeSignal,
+  decodeSignal,
+  gatherCandidates,
+  type SignalPayload,
+} from "./signalingUtils";
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
+// ── Phase state machine ────────────────────────────────────────────────────────
+// idle → gathering → offer_ready → in_room   (host path)
+// idle → gathering → answer_ready → in_room  (guest path)
+// in_room → gathering → offer_ready          (invite more peers)
+export type Phase =
+  | "idle"
+  | "gathering"
+  | "offer_ready"
+  | "answer_ready"
+  | "in_room";
 
 interface WebRTCCtx {
+  phase: Phase;
+  myCode: string;          // code to share with the other side
+  gatherError: string;     // error during ICE gathering
+
+  // Signaling actions
+  startHost: (myName: string, roomName: string) => Promise<void>;
+  startGuest: (offerCode: string, myName: string) => Promise<void>;
+  completeHandshake: (answerCode: string) => Promise<void>;
+  generateInvite: () => Promise<void>;  // add more peers while in_room
+
+  // Room state
   room: Room | null;
   selfId: string;
   selfName: string;
   peers: Map<string, PeerConnection>;
+
+  // Media
   localStream: MediaStream | null;
-  joinRoom: (roomId: string, roomName: string, peerName: string) => void;
-  leaveRoom: () => void;
+  micEnabled: boolean;
+  camEnabled: boolean;
+  isScreenSharing: boolean;
   toggleMic: () => void;
   toggleCam: () => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
-  micEnabled: boolean;
-  camEnabled: boolean;
-  isScreenSharing: boolean;
+  leaveRoom: () => void;
+
+  // Modules
   sendModuleEvent: (moduleId: string, event: string, payload: unknown, to?: string) => void;
   onModuleEvent: (handler: (env: ModuleEventEnvelope) => void) => () => void;
 }
@@ -37,9 +62,11 @@ interface WebRTCCtx {
 const Ctx = createContext<WebRTCCtx>({} as WebRTCCtx);
 
 export function WebRTCProvider({ children }: { children: ReactNode }) {
-  const { socket } = useSocket();
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [myCode, setMyCode] = useState("");
+  const [gatherError, setGatherError] = useState("");
   const [room, setRoom] = useState<Room | null>(null);
-  const [selfId, setSelfId] = useState("");
+  const [selfId] = useState(() => crypto.randomUUID().slice(0, 8));
   const [selfName, setSelfName] = useState("");
   const [peers, setPeers] = useState<Map<string, PeerConnection>>(new Map());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -50,162 +77,246 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const moduleHandlers = useRef<Set<(env: ModuleEventEnvelope) => void>>(new Set());
+  // pending PC waiting for answer (keyed by the temp offer id)
+  const pendingPCRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const roomRef = useRef<Room | null>(null);
   const selfNameRef = useRef("");
 
   function updatePeers() {
     setPeers(new Map(peersRef.current));
   }
 
-  function createPC(peerId: string, peerName: string): PeerConnection {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    const dataChannels = new Map<string, RTCDataChannel>();
+  // ── Media ───────────────────────────────────────────────────────────────────
 
+  async function acquireMedia() {
+    if (localStreamRef.current) return;
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      localStreamRef.current = s;
+      setLocalStream(s);
+    } catch {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStreamRef.current = s;
+        setLocalStream(s);
+      } catch {
+        localStreamRef.current = new MediaStream();
+        setLocalStream(localStreamRef.current);
+      }
+    }
+  }
+
+  // ── Peer connection management ──────────────────────────────────────────────
+
+  function wirePC(pc: RTCPeerConnection, peerId: string, peerName: string): PeerConnection {
+    const dataChannels = new Map<string, RTCDataChannel>();
     const conn: PeerConnection = { peerId, peerName, pc, dataChannels };
     peersRef.current.set(peerId, conn);
 
-    // Add local tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => pc.addTrack(t, localStreamRef.current!));
     }
 
-    // Remote stream
     pc.ontrack = (e) => {
-      const existing = peersRef.current.get(peerId);
-      if (existing) {
-        existing.stream = e.streams[0];
-        peersRef.current.set(peerId, existing);
-        updatePeers();
-      }
+      const c = peersRef.current.get(peerId);
+      if (c) { c.stream = e.streams[0]; peersRef.current.set(peerId, c); updatePeers(); }
     };
 
-    // ICE
-    pc.onicecandidate = (e) => {
-      if (e.candidate && socket) {
-        socket.emit("signal:ice", { to: peerId, candidate: e.candidate.toJSON(), from: socket.id });
-      }
-    };
-
-    // Data channel (receive side)
     pc.ondatachannel = (e) => {
       const dc = e.channel;
       dataChannels.set(dc.label, dc);
-      dc.onmessage = (ev) => {
-        try {
-          const env: ModuleEventEnvelope = JSON.parse(ev.data);
-          moduleHandlers.current.forEach((h) => h({ ...env, from: peerId }));
-        } catch (_) {}
-      };
+      wireDataChannel(dc, peerId);
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-        removePeer(peerId);
+      const s = pc.connectionState;
+      if (s === "connected") {
+        const c = peersRef.current.get(peerId);
+        if (c) { peersRef.current.set(peerId, c); updatePeers(); }
+        if (phase !== "in_room") enterRoom();
       }
+      if (s === "failed" || s === "closed") removePeer(peerId);
     };
 
     updatePeers();
     return conn;
   }
 
-  function openDataChannel(conn: PeerConnection, label: string) {
-    if (conn.dataChannels.has(label)) return conn.dataChannels.get(label)!;
-    const dc = conn.pc.createDataChannel(label);
-    conn.dataChannels.set(label, dc);
+  function wireDataChannel(dc: RTCDataChannel, peerId: string) {
     dc.onmessage = (ev) => {
       try {
         const env: ModuleEventEnvelope = JSON.parse(ev.data);
-        moduleHandlers.current.forEach((h) => h({ ...env, from: conn.peerId }));
+        moduleHandlers.current.forEach((h) => h({ ...env, from: peerId }));
       } catch (_) {}
     };
+  }
+
+  function createDataChannel(conn: PeerConnection, label: string): RTCDataChannel {
+    if (conn.dataChannels.has(label)) return conn.dataChannels.get(label)!;
+    const dc = conn.pc.createDataChannel(label);
+    conn.dataChannels.set(label, dc);
+    wireDataChannel(dc, conn.peerId);
     return dc;
   }
 
-  async function initiateOffer(peerId: string, peerName: string) {
-    const conn = createPC(peerId, peerName);
-    openDataChannel(conn, "nexroom");
-    const offer = await conn.pc.createOffer();
-    await conn.pc.setLocalDescription(offer);
-    socket?.emit("signal:offer", { to: peerId, offer, from: socket.id });
-  }
-
   function removePeer(peerId: string) {
-    const conn = peersRef.current.get(peerId);
-    if (conn) {
-      conn.pc.close();
-      peersRef.current.delete(peerId);
-      updatePeers();
-    }
+    const c = peersRef.current.get(peerId);
+    if (c) { c.pc.close(); peersRef.current.delete(peerId); updatePeers(); }
+    setRoom((r) => r ? { ...r, peers: r.peers.filter((p) => p.id !== peerId) } : r);
   }
 
-  // ── Socket events ──
-  useSocketEvent(socket, "room:joined", ({ room: r, self }: { room: Room; self: { id: string; name: string } }) => {
-    setRoom(r);
-    setSelfId(self.id);
-    setSelfName(selfNameRef.current);
-    // Initiate offers to all existing peers
-    r.peers.filter((p) => p.id !== self.id).forEach((p) => initiateOffer(p.id, p.name));
-  });
+  function enterRoom() {
+    setPhase("in_room");
+    if (!roomRef.current) return;
+    setRoom({ ...roomRef.current });
+  }
 
-  useSocketEvent(socket, "peer:joined", ({ peer }: { peer: { id: string; name: string; socketId: string } }) => {
-    setRoom((prev) => prev ? { ...prev, peers: [...prev.peers, peer] } : prev);
-    // Offer is initiated by the joining side, we just wait
-  });
+  // ── Host path ───────────────────────────────────────────────────────────────
 
-  useSocketEvent(socket, "peer:left", ({ peerId }: { peerId: string }) => {
-    removePeer(peerId);
-    setRoom((prev) => prev ? { ...prev, peers: prev.peers.filter((p) => p.id !== peerId) } : prev);
-  });
+  async function startHost(myName: string, roomName: string) {
+    setSelfName(myName);
+    selfNameRef.current = myName;
+    const roomId = crypto.randomUUID().slice(0, 8);
+    roomRef.current = { id: roomId, name: roomName, peers: [] };
 
-  useSocketEvent(socket, "signal:offer", async ({ from, offer }: { from: string; offer: RTCSessionDescriptionInit }) => {
-    const peerName = room?.peers.find((p) => p.id === from)?.name || from;
-    const conn = createPC(from, peerName);
-    await conn.pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await conn.pc.createAnswer();
-    await conn.pc.setLocalDescription(answer);
-    socket?.emit("signal:answer", { to: from, answer, from: socket!.id });
-  });
+    await acquireMedia();
+    setPhase("gathering");
+    setGatherError("");
 
-  useSocketEvent(socket, "signal:answer", async ({ from, answer }: { from: string; answer: RTCSessionDescriptionInit }) => {
-    const conn = peersRef.current.get(from);
-    if (conn) await conn.pc.setRemoteDescription(new RTCSessionDescription(answer));
-  });
-
-  useSocketEvent(socket, "signal:ice", async ({ from, candidate }: { from: string; candidate: RTCIceCandidateInit }) => {
-    const conn = peersRef.current.get(from);
-    if (conn) await conn.pc.addIceCandidate(new RTCIceCandidate(candidate));
-  });
-
-  useSocketEvent(socket, "module:event", (env: ModuleEventEnvelope) => {
-    moduleHandlers.current.forEach((h) => h(env));
-  });
-
-  // ── Public API ──
-
-  async function joinRoom(roomId: string, roomName: string, peerName: string) {
-    selfNameRef.current = peerName;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-    } catch (_) {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }).catch(() => new MediaStream());
-      localStreamRef.current = stream;
-      setLocalStream(stream);
+      const offerId = crypto.randomUUID().slice(0, 8);
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pendingPCRef.current.set(offerId, pc);
+
+      // open data channel (offerer side)
+      const tempConn: PeerConnection = { peerId: offerId, peerName: "", pc, dataChannels: new Map() };
+      createDataChannel(tempConn, "nexroom");
+
+      const { sdp, candidates } = await gatherCandidates(pc, "offer");
+      const payload: SignalPayload = {
+        type: "offer", sdp, candidates,
+        fromId: selfId, fromName: myName,
+        roomId, roomName,
+      };
+      setMyCode(encodeSignal(payload));
+      setPhase("offer_ready");
+    } catch (e) {
+      setGatherError((e as Error).message);
+      setPhase("idle");
     }
-    socket?.emit("room:join", { roomId, roomName, peerName });
   }
+
+  async function completeHandshake(answerCode: string) {
+    setGatherError("");
+    try {
+      const payload = decodeSignal(answerCode);
+      if (payload.type !== "answer") throw new Error("Expected an answer code.");
+
+      // find the pending PC — for simplicity take the first one
+      const [offerId, pc] = [...pendingPCRef.current.entries()][0] ?? [];
+      if (!pc) throw new Error("No pending connection found.");
+
+      await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+      for (const c of payload.candidates) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+      }
+
+      const conn = wirePC(pc, payload.fromId, payload.fromName);
+      createDataChannel(conn, "nexroom");
+      pendingPCRef.current.delete(offerId);
+
+      roomRef.current = {
+        ...roomRef.current!,
+        peers: [...(roomRef.current?.peers ?? []), { id: payload.fromId, name: payload.fromName }],
+      };
+      setMyCode("");
+    } catch (e) {
+      setGatherError((e as Error).message);
+    }
+  }
+
+  // ── Guest path ──────────────────────────────────────────────────────────────
+
+  async function startGuest(offerCode: string, myName: string) {
+    setSelfName(myName);
+    selfNameRef.current = myName;
+    setPhase("gathering");
+    setGatherError("");
+
+    try {
+      const payload = decodeSignal(offerCode);
+      if (payload.type !== "offer") throw new Error("Expected an invite code.");
+
+      roomRef.current = { id: payload.roomId, name: payload.roomName, peers: [{ id: payload.fromId, name: payload.fromName }] };
+
+      await acquireMedia();
+
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const { sdp, candidates } = await gatherCandidates(pc, "answer", payload.sdp);
+
+      // apply the offerer's ICE candidates
+      for (const c of payload.candidates) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+      }
+
+      wirePC(pc, payload.fromId, payload.fromName);
+
+      const answerPayload: SignalPayload = {
+        type: "answer", sdp, candidates,
+        fromId: selfId, fromName: myName,
+        roomId: payload.roomId, roomName: payload.roomName,
+      };
+      setMyCode(encodeSignal(answerPayload));
+      setPhase("answer_ready");
+    } catch (e) {
+      setGatherError((e as Error).message);
+      setPhase("idle");
+    }
+  }
+
+  // ── Invite more peers (while already in room) ────────────────────────────────
+
+  async function generateInvite() {
+    if (!roomRef.current) return;
+    setPhase("gathering");
+    setGatherError("");
+    try {
+      const offerId = crypto.randomUUID().slice(0, 8);
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pendingPCRef.current.set(offerId, pc);
+      const tempConn: PeerConnection = { peerId: offerId, peerName: "", pc, dataChannels: new Map() };
+      createDataChannel(tempConn, "nexroom");
+
+      const { sdp, candidates } = await gatherCandidates(pc, "offer");
+      const payload: SignalPayload = {
+        type: "offer", sdp, candidates,
+        fromId: selfId, fromName: selfNameRef.current,
+        roomId: roomRef.current.id, roomName: roomRef.current.name,
+      };
+      setMyCode(encodeSignal(payload));
+      setPhase("offer_ready");
+    } catch (e) {
+      setGatherError((e as Error).message);
+      setPhase("in_room");
+    }
+  }
+
+  // ── Media controls ──────────────────────────────────────────────────────────
 
   function leaveRoom() {
-    socket?.emit("room:leave");
     peersRef.current.forEach((c) => c.pc.close());
     peersRef.current.clear();
+    pendingPCRef.current.forEach((pc) => pc.close());
+    pendingPCRef.current.clear();
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    roomRef.current = null;
     setLocalStream(null);
     setRoom(null);
-    setSelfId("");
     setSelfName("");
     setPeers(new Map());
+    setMyCode("");
+    setPhase("idle");
     setIsScreenSharing(false);
   }
 
@@ -227,7 +338,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       if (sender) sender.replaceTrack(videoTrack);
     });
     setIsScreenSharing(true);
-    videoTrack.onended = () => stopScreenShare();
+    videoTrack.onended = stopScreenShare;
   }
 
   function stopScreenShare() {
@@ -241,13 +352,14 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setIsScreenSharing(false);
   }
 
+  // ── Module events ────────────────────────────────────────────────────────────
+
   const sendModuleEvent = useCallback(
     (moduleId: string, event: string, payload: unknown, to?: string) => {
       const env: ModuleEventEnvelope = { moduleId, event, payload, from: selfId };
       const msg = JSON.stringify(env);
       if (to) {
-        const conn = peersRef.current.get(to);
-        const dc = conn?.dataChannels.get("nexroom");
+        const dc = peersRef.current.get(to)?.dataChannels.get("nexroom");
         if (dc?.readyState === "open") dc.send(msg);
       } else {
         peersRef.current.forEach((conn) => {
@@ -255,10 +367,8 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           if (dc?.readyState === "open") dc.send(msg);
         });
       }
-      // Also relay via socket as fallback
-      socket?.emit("module:event", { moduleId, event, payload, to });
     },
-    [selfId, socket]
+    [selfId]
   );
 
   const onModuleEvent = useCallback((handler: (env: ModuleEventEnvelope) => void) => {
@@ -268,10 +378,11 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={{
-      room, selfId, selfName, peers, localStream,
-      joinRoom, leaveRoom, toggleMic, toggleCam,
-      startScreenShare, stopScreenShare,
-      micEnabled, camEnabled, isScreenSharing,
+      phase, myCode, gatherError,
+      startHost, startGuest, completeHandshake, generateInvite,
+      room, selfId, selfName, peers,
+      localStream, micEnabled, camEnabled, isScreenSharing,
+      toggleMic, toggleCam, startScreenShare, stopScreenShare, leaveRoom,
       sendModuleEvent, onModuleEvent,
     }}>
       {children}
@@ -282,3 +393,4 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
 export function useWebRTC() {
   return useContext(Ctx);
 }
+

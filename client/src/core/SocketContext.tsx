@@ -24,7 +24,7 @@ const Ctx = createContext<SocketCtx>({
 });
 
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const stored = localStorage.getItem("nexroom_server") || "http://localhost:4000";
+  const stored = localStorage.getItem("nexroom_server") || "https://nexroom-signaling.onrender.com";
   const [serverUrl, setServerUrlState] = useState(stored);
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);

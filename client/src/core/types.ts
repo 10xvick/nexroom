@@ -3,14 +3,12 @@ import type { ComponentType } from "react";
 export interface Peer {
   id: string;
   name: string;
-  socketId: string;
 }
 
 export interface Room {
   id: string;
   name: string;
   peers: Peer[];
-  moduleState: Record<string, unknown>;
 }
 
 export interface SignalEnvelope {
