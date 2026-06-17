@@ -1,238 +1,20 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState } from "react";
 import type { ModuleProps } from "../../core/types";
+import { useFileTransfer } from "../../core/useFileTransfer";
 import { 
   FolderUp, FileDown, CheckCircle2, ShieldAlert, Loader, 
   XCircle, FileText, FileImage, FileAudio, FileVideo, FileCode, Archive, File, Users 
 } from "lucide-react";
 
-interface FileMetadata {
-  fileId: string;
-  name: string;
-  size: number;
-  type: string;
-  totalChunks: number;
-}
-
-interface TransferState {
-  fileId: string;
-  name: string;
-  size: number;
-  type: string;
-  progress: number;
-  status: "idle" | "sending" | "receiving" | "completed" | "failed";
-  direction: "send" | "receive";
-  peerId: string;
-  downloadUrl?: string;
-}
-
-const CHUNK_SIZE = 16384; // 16KB chunks
-
-export default function FileSharingModule({ selfId, peers, sendModuleEvent, onModuleEvent }: ModuleProps) {
-  const [transfers, setTransfers] = useState<Record<string, TransferState>>({});
+export default function FileSharingModule({ selfId, peers }: ModuleProps) {
   const [targetPeerId, setTargetPeerId] = useState<string>("all");
   const [dragActive, setDragActive] = useState(false);
   
-  const sendingFilesRef = useRef<Record<string, { file: File; totalChunks: number }>>({});
-  const receivingChunksRef = useRef<Record<string, { chunks: (string | undefined)[]; meta: FileMetadata; fromPeer: string }>>({});
-
-  useEffect(() => {
-    return onModuleEvent((env) => {
-      // env.event is the discriminator; env.payload is the data
-      const event = env.event;
-      const data = env.payload as any;
-
-      // ── Receiver: sender announced a new file ──
-      if (event === "file:start") {
-        const meta = data as FileMetadata;
-        receivingChunksRef.current[meta.fileId] = {
-          chunks: new Array(meta.totalChunks).fill(undefined),
-          meta,
-          fromPeer: env.from
-        };
-
-        setTransfers((prev) => ({
-          ...prev,
-          [meta.fileId]: {
-            fileId: meta.fileId,
-            name: meta.name,
-            size: meta.size,
-            type: meta.type,
-            progress: 0,
-            status: "receiving",
-            direction: "receive",
-            peerId: env.from
-          }
-        }));
-
-        // ACK to trigger first chunk
-        sendModuleEvent("file:ack", { fileId: meta.fileId, chunkIndex: -1 }, env.from);
-      }
-
-      // ── Receiver: got a chunk ──
-      else if (event === "file:chunk") {
-        const { fileId, chunkIndex, data: chunkData } = data;
-        const entry = receivingChunksRef.current[fileId];
-        if (!entry) return;
-
-        entry.chunks[chunkIndex] = chunkData;
-        const received = entry.chunks.filter((c) => c !== undefined).length;
-        const total = entry.meta.totalChunks;
-        const progress = Math.round((received / total) * 100);
-
-        setTransfers((prev) => {
-          const t = prev[fileId];
-          if (!t || t.status === "failed") return prev;
-          return {
-            ...prev,
-            [fileId]: { ...t, progress, status: progress === 100 ? "completed" : "receiving" }
-          };
-        });
-
-        if (progress === 100) {
-          // Reassemble
-          try {
-            const byteArrays = entry.chunks.map((base64) => {
-              const binary = atob(base64!);
-              const bytes = new Uint8Array(binary.length);
-              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-              return bytes;
-            });
-            const blob = new Blob(byteArrays, { type: entry.meta.type || "application/octet-stream" });
-            const downloadUrl = URL.createObjectURL(blob);
-
-            setTransfers((prev) => ({
-              ...prev,
-              [fileId]: { ...prev[fileId], status: "completed", progress: 100, downloadUrl }
-            }));
-            delete receivingChunksRef.current[fileId];
-          } catch (e) {
-            console.error("Failed to reassemble file:", e);
-            setTransfers((prev) => ({
-              ...prev,
-              [fileId]: { ...prev[fileId], status: "failed" }
-            }));
-          }
-        } else {
-          // ACK next chunk
-          sendModuleEvent("file:ack", { fileId, chunkIndex }, env.from);
-        }
-      }
-
-      // ── Sender: receiver ACKed — send next chunk ──
-      else if (event === "file:ack") {
-        const { fileId, chunkIndex } = data;
-        const task = sendingFilesRef.current[fileId];
-        if (!task) return;
-
-        const nextChunk = chunkIndex + 1;
-        if (nextChunk < task.totalChunks) {
-          sendChunk(fileId, nextChunk, env.from);
-        } else {
-          setTransfers((prev) => ({
-            ...prev,
-            [fileId]: { ...prev[fileId], status: "completed", progress: 100 }
-          }));
-          delete sendingFilesRef.current[fileId];
-        }
-      }
-
-      // ── Either side: transfer cancelled ──
-      else if (event === "file:cancel") {
-        const { fileId } = data;
-        delete sendingFilesRef.current[fileId];
-        delete receivingChunksRef.current[fileId];
-        setTransfers((prev) => {
-          if (!prev[fileId]) return prev;
-          return { ...prev, [fileId]: { ...prev[fileId], status: "failed" } };
-        });
-      }
-    });
-  }, [onModuleEvent, sendModuleEvent]);
-
-  const sendChunk = (fileId: string, chunkIdx: number, toPeerId: string) => {
-    const task = sendingFilesRef.current[fileId];
-    if (!task) return;
-
-    const start = chunkIdx * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, task.file.size);
-    const reader = new FileReader();
-
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      if (!result) return;
-
-      // Use env.event as discriminator, payload = pure data
-      sendModuleEvent("file:chunk", {
-        fileId,
-        chunkIndex: chunkIdx,
-        data: result.split(",")[1] // base64 only
-      }, toPeerId);
-
-      const progress = Math.round(((chunkIdx + 1) / task.totalChunks) * 100);
-      setTransfers((prev) => {
-        if (!prev[fileId] || prev[fileId].status === "failed") return prev;
-        return {
-          ...prev,
-          [fileId]: { ...prev[fileId], progress: Math.min(progress, 99) }
-        };
-      });
-    };
-
-    reader.readAsDataURL(task.file.slice(start, end));
-  };
-
-  const startFileTransfer = (file: File) => {
-    const activePeers = Array.from(peers.values());
-    if (activePeers.length === 0) {
-      alert("No peers in the room to share files with!");
-      return;
-    }
-
-    const targets = targetPeerId === "all"
-      ? activePeers
-      : activePeers.filter((p) => p.peerId === targetPeerId);
-
-    targets.forEach((peer) => {
-      const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-      sendingFilesRef.current[fileId] = { file, totalChunks };
-
-      setTransfers((prev) => ({
-        ...prev,
-        [fileId]: {
-          fileId,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          progress: 0,
-          status: "sending",
-          direction: "send",
-          peerId: peer.peerId
-        }
-      }));
-
-      // Send file metadata as payload — event = "file:start" is the discriminator
-      const meta: FileMetadata = { fileId, name: file.name, size: file.size, type: file.type, totalChunks };
-      sendModuleEvent("file:start", meta, peer.peerId);
-    });
-  };
-
-  const cancelTransfer = (fileId: string) => {
-    const t = transfers[fileId];
-    if (!t) return;
-    sendModuleEvent("file:cancel", { fileId }, t.peerId);
-    delete sendingFilesRef.current[fileId];
-    delete receivingChunksRef.current[fileId];
-    setTransfers((prev) => ({
-      ...prev,
-      [fileId]: { ...prev[fileId], status: "failed" }
-    }));
-  };
+  const { transfers, startFileTransfer, cancelTransfer } = useFileTransfer("filesharing");
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) startFileTransfer(file);
+    if (file) startFileTransfer(file, targetPeerId);
     e.target.value = ""; // reset so same file can be picked again
   };
 
@@ -247,7 +29,7 @@ export default function FileSharingModule({ selfId, peers, sendModuleEvent, onMo
     e.stopPropagation();
     setDragActive(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) startFileTransfer(file);
+    if (file) startFileTransfer(file, targetPeerId);
   };
 
   const formatSize = (bytes: number) => {
