@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { ModuleProps } from "../../core/types";
 import type { GameState } from "./GamesModule";
 import { User, ShieldAlert } from "lucide-react";
@@ -29,6 +29,7 @@ export default function Chess({
   const playerBlack = gameState.players["black"];
 
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const peerList = Array.from(peers.values());
   const getPeerName = (id: string) => {
@@ -85,6 +86,84 @@ export default function Chess({
     }
   };
 
+  // Canvas rendering logic
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.width * dpr;
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = rect.width;
+    const cellSize = w / 8;
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const isDark = (r + c) % 2 === 1;
+        const isSelected = selectedCell?.[0] === r && selectedCell?.[1] === c;
+
+        // Draw square cell
+        ctx.fillStyle = isDark ? "#302E2B" : "#F0D9B5";
+        ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+
+        // Highlight selection
+        if (isSelected) {
+          ctx.fillStyle = "rgba(59, 130, 246, 0.35)"; // Tailwind blue highlight
+          ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+          ctx.strokeStyle = "#3b82f6";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(c * cellSize + 1.5, r * cellSize + 1.5, cellSize - 3, cellSize - 3);
+        }
+
+        // Draw piece text
+        const piece = board[r][c];
+        if (piece) {
+          ctx.font = `${cellSize * 0.7}px "Segoe UI Symbol", Symbola, "DejaVu Sans", sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+
+          const char = PIECES[piece];
+          const px = c * cellSize + cellSize / 2;
+          const py = r * cellSize + cellSize / 2;
+
+          if (piece.startsWith("w")) {
+            ctx.fillStyle = "#ffffff";
+            ctx.shadowColor = "rgba(0,0,0,0.85)";
+            ctx.shadowBlur = 4;
+            ctx.fillText(char, px, py);
+            ctx.shadowBlur = 0;
+          } else {
+            ctx.fillStyle = "#000000";
+            ctx.fillText(char, px, py);
+          }
+        }
+      }
+    }
+  }, [board, selectedCell]);
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cellSize = rect.width / 8;
+
+    const col = Math.floor(x / cellSize);
+    const row = Math.floor(y / cellSize);
+
+    if (row >= 0 && row < 8 && col >= 0 && col < 8) {
+      handleCellClick(row, col);
+    }
+  };
+
   return (
     <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center">
       {/* Chess Board Column */}
@@ -104,38 +183,13 @@ export default function Chess({
           )}
         </div>
 
-        {/* 8x8 Board Grid */}
+        {/* 8x8 Canvas Board */}
         <div className="w-full aspect-square border border-border/40 rounded-2xl overflow-hidden shadow-2xl bg-surface/10 p-2">
-          <div className="grid grid-rows-8 h-full w-full">
-            {board.map((rowArr, rowIdx) => (
-              <div key={rowIdx} className="grid grid-cols-8 w-full h-full">
-                {rowArr.map((piece, colIdx) => {
-                  const isDark = (rowIdx + colIdx) % 2 === 1;
-                  const isSelected = selectedCell?.[0] === rowIdx && selectedCell?.[1] === colIdx;
-                  
-                  return (
-                    <button
-                      key={colIdx}
-                      onClick={() => handleCellClick(rowIdx, colIdx)}
-                      className={`w-full h-full flex items-center justify-center text-3xl font-normal transition-all relative ${
-                        isDark ? "bg-[#302E2B]" : "bg-[#F0D9B5]"
-                      } ${isSelected ? "ring-4 ring-accent ring-inset" : ""}`}
-                    >
-                      {piece && (
-                        <span
-                          className={`select-none ${
-                            piece.startsWith("w") ? "text-[#ffffff] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" : "text-[#000000]"
-                          }`}
-                        >
-                          {PIECES[piece]}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            className={`w-full h-full block ${myRole ? "cursor-pointer" : "cursor-not-allowed"}`}
+          />
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import type { ModuleProps } from "../../core/types";
 import type { GameState } from "./GamesModule";
 import { User, ShieldAlert } from "lucide-react";
@@ -34,6 +34,7 @@ export default function TicTacToe({
   const { board, xTurn, scoreX, scoreO } = gameState.tictactoe;
   const playerX = gameState.players["X"];
   const playerO = gameState.players["O"];
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const peerList = Array.from(peers.values());
   const getPeerName = (id: string) => {
@@ -83,6 +84,101 @@ export default function TicTacToe({
     updateGameState(nextState);
   };
 
+  // Canvas Drawing Logic
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Support High DPI displays
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.width * dpr; // maintain square ratio
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = rect.width;
+    const cellSize = w / 3;
+
+    // Clear background
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(15, 23, 42, 0.4)";
+    ctx.fillRect(0, 0, w, h);
+
+    // Draw grid lines
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+
+    // Vertical grid lines
+    ctx.beginPath();
+    ctx.moveTo(cellSize, 16);
+    ctx.lineTo(cellSize, h - 16);
+    ctx.moveTo(cellSize * 2, 16);
+    ctx.lineTo(cellSize * 2, h - 16);
+    // Horizontal grid lines
+    ctx.moveTo(16, cellSize);
+    ctx.lineTo(w - 16, cellSize);
+    ctx.moveTo(16, cellSize * 2);
+    ctx.lineTo(w - 16, cellSize * 2);
+    ctx.stroke();
+
+    // Draw pieces
+    board.forEach((cell, idx) => {
+      const row = Math.floor(idx / 3);
+      const col = idx % 3;
+      const cx = col * cellSize + cellSize / 2;
+      const cy = row * cellSize + cellSize / 2;
+      const size = cellSize * 0.28; // radius/half-size
+
+      if (cell === "X") {
+        ctx.strokeStyle = "#3b82f6"; // Tailwind blue-500
+        ctx.shadowColor = "rgba(59, 130, 246, 0.4)";
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 6;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(cx - size, cy - size);
+        ctx.lineTo(cx + size, cy + size);
+        ctx.moveTo(cx + size, cy - size);
+        ctx.lineTo(cx - size, cy + size);
+        ctx.stroke();
+        ctx.shadowBlur = 0; // reset
+      } else if (cell === "O") {
+        ctx.strokeStyle = "#f59e0b"; // Tailwind amber-500
+        ctx.shadowColor = "rgba(245, 158, 11, 0.4)";
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 6;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(cx, cy, size, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0; // reset
+      }
+    });
+  }, [board]);
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!myMark || !isMyTurn || winner) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cellSize = rect.width / 3;
+
+    const col = Math.floor(x / cellSize);
+    const row = Math.floor(y / cellSize);
+    const index = row * 3 + col;
+
+    if (index >= 0 && index < 9) {
+      move(index);
+    }
+  };
+
   return (
     <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center">
       {/* Game Board Column */}
@@ -112,26 +208,13 @@ export default function TicTacToe({
           )}
         </div>
 
-        {/* 3x3 Grid */}
-        <div className="grid grid-cols-3 gap-2.5 w-full aspect-square bg-surface/10 p-3 rounded-2xl border border-border/30">
-          {board.map((cell, i) => (
-            <button
-              key={i}
-              onClick={() => move(i)}
-              disabled={!myMark || !isMyTurn || !!cell || !!winner}
-              className={`w-full h-full flex items-center justify-center text-4xl font-extrabold rounded-xl border transition-all ${
-                cell === "X"
-                  ? "bg-accent/15 border-accent text-accent shadow-[0_0_12px_rgba(var(--accent-rgb),0.2)]"
-                  : cell === "O"
-                  ? "bg-warn/15 border-warn text-warn shadow-[0_0_12px_rgba(var(--warn-rgb),0.2)]"
-                  : myMark && isMyTurn && !winner
-                  ? "bg-surface border-border hover:border-accent hover:scale-[1.03]"
-                  : "bg-surface/40 border-border/40 cursor-not-allowed"
-              }`}
-            >
-              {cell}
-            </button>
-          ))}
+        {/* 3x3 Canvas Grid */}
+        <div className="w-full aspect-square bg-surface/10 rounded-2xl border border-border/30 overflow-hidden shadow-2xl">
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            className={`w-full h-full block ${myMark && isMyTurn && !winner ? "cursor-pointer" : "cursor-not-allowed"}`}
+          />
         </div>
 
         {/* Local Reset */}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import type { ModuleProps } from "../../core/types";
 import type { GameState } from "./GamesModule";
 import { User, ShieldAlert, Dice5 } from "lucide-react";
@@ -35,6 +35,7 @@ export default function Ludo({
   const { positions, turn, diceValue, hasRolled } = gameState.ludo;
   const playerRed = gameState.players["red"];
   const playerGreen = gameState.players["green"];
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const peerList = Array.from(peers.values());
   const getPeerName = (id: string) => {
@@ -104,6 +105,179 @@ export default function Ludo({
     });
   };
 
+  // Helper to get coordinates for tokens inside their base
+  const getBaseCoords = (tokenId: string, cellSize: number) => {
+    if (tokenId === "red_0") return { x: 1.5 * cellSize, y: 1.5 * cellSize };
+    if (tokenId === "red_1") return { x: 2.5 * cellSize, y: 1.5 * cellSize };
+    if (tokenId === "green_0") return { x: 7.5 * cellSize, y: 7.5 * cellSize };
+    return { x: 8.5 * cellSize, y: 7.5 * cellSize }; // green_1
+  };
+
+  // Draw board on canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.width * dpr;
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = rect.width;
+    const cellSize = w / 10;
+
+    // 1. Draw clear dark background
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#201F1D";
+    ctx.fillRect(0, 0, w, h);
+
+    // 2. Draw red start base (top-left 3x3 cells)
+    ctx.fillStyle = "rgba(239, 68, 68, 0.08)";
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.3)";
+    ctx.lineWidth = 2;
+    ctx.fillRect(0.5 * cellSize, 0.5 * cellSize, 3 * cellSize, 3 * cellSize);
+    ctx.strokeRect(0.5 * cellSize, 0.5 * cellSize, 3 * cellSize, 3 * cellSize);
+
+    ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
+    ctx.font = `bold ${cellSize * 0.45}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("RED BASE", 2 * cellSize, 2.7 * cellSize);
+
+    // 3. Draw green start base (bottom-right 3x3 cells)
+    ctx.fillStyle = "rgba(16, 185, 129, 0.08)";
+    ctx.strokeStyle = "rgba(16, 185, 129, 0.3)";
+    ctx.fillRect(6.5 * cellSize, 6.5 * cellSize, 3 * cellSize, 3 * cellSize);
+    ctx.strokeRect(6.5 * cellSize, 6.5 * cellSize, 3 * cellSize, 3 * cellSize);
+
+    ctx.fillStyle = "rgba(16, 185, 129, 0.8)";
+    ctx.fillText("GREEN BASE", 8 * cellSize, 8.7 * cellSize);
+
+    // 4. Draw track squares
+    PATH_COORDS.forEach((cell, idx) => {
+      const cx = cell.c * cellSize;
+      const cy = cell.r * cellSize;
+
+      const isRedHalf = idx < 10;
+      ctx.fillStyle = isRedHalf ? "rgba(239, 68, 68, 0.18)" : "rgba(16, 185, 129, 0.18)";
+      ctx.strokeStyle = isRedHalf ? "rgba(239, 68, 68, 0.35)" : "rgba(16, 185, 129, 0.35)";
+      ctx.lineWidth = 1.5;
+
+      ctx.fillRect(cx, cy, cellSize, cellSize);
+      ctx.strokeRect(cx, cy, cellSize, cellSize);
+
+      // Label track coordinates subtly
+      ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+      ctx.font = `${cellSize * 0.3}px monospace`;
+      ctx.fillText(idx.toString(), cx + cellSize / 2, cy + cellSize / 2);
+    });
+
+    // 5. Draw tokens
+    Object.keys(positions).forEach((tok) => {
+      const pos = positions[tok];
+      const color = tok.startsWith("red") ? COLORS.red : COLORS.green;
+      const isRedToken = tok.startsWith("red");
+
+      let tx = 0;
+      let ty = 0;
+
+      if (pos === -1) {
+        const coords = getBaseCoords(tok, cellSize);
+        tx = coords.x;
+        ty = coords.y;
+      } else {
+        const cell = PATH_COORDS[pos];
+        const tokensOnSquare = Object.keys(positions).filter(k => positions[k] === pos);
+        const idx = tokensOnSquare.indexOf(tok);
+
+        tx = cell.c * cellSize + cellSize / 2;
+        ty = cell.r * cellSize + cellSize / 2;
+
+        if (tokensOnSquare.length > 1) {
+          // Offset tokens slightly on same cell
+          tx += (idx - (tokensOnSquare.length - 1) / 2) * (cellSize * 0.45);
+        }
+      }
+
+      // Draw Token Circle
+      ctx.beginPath();
+      ctx.arc(tx, ty, cellSize * 0.28, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+      ctx.shadowBlur = 4;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Draw Highlight border if playable
+      const isPlayable = isMyTurn && hasRolled && isRedToken === (turn === "red");
+      ctx.beginPath();
+      ctx.arc(tx, ty, cellSize * 0.28, 0, Math.PI * 2);
+      ctx.strokeStyle = isPlayable ? "#ffffff" : "rgba(0, 0, 0, 0.6)";
+      ctx.lineWidth = isPlayable ? 3.5 : 1.5;
+      ctx.stroke();
+
+      // Inner dot
+      ctx.beginPath();
+      ctx.arc(tx, ty, cellSize * 0.1, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    });
+
+  }, [positions, turn, hasRolled, isMyTurn]);
+
+  // Click handler on canvas
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cellSize = rect.width / 10;
+    const tokenRadius = cellSize * 0.35;
+
+    // Check click distance on all tokens
+    let clickedTokenId: string | null = null;
+    const tokenIds = Object.keys(positions);
+
+    for (const tok of tokenIds) {
+      const pos = positions[tok];
+      let tx = 0;
+      let ty = 0;
+
+      if (pos === -1) {
+        const coords = getBaseCoords(tok, cellSize);
+        tx = coords.x;
+        ty = coords.y;
+      } else {
+        const cell = PATH_COORDS[pos];
+        const tokensOnSquare = Object.keys(positions).filter(k => positions[k] === pos);
+        const idx = tokensOnSquare.indexOf(tok);
+
+        tx = cell.c * cellSize + cellSize / 2;
+        ty = cell.r * cellSize + cellSize / 2;
+
+        if (tokensOnSquare.length > 1) {
+          tx += (idx - (tokensOnSquare.length - 1) / 2) * (cellSize * 0.45);
+        }
+      }
+
+      const dist = Math.hypot(x - tx, y - ty);
+      if (dist <= tokenRadius) {
+        clickedTokenId = tok;
+        break;
+      }
+    }
+
+    if (clickedTokenId) {
+      moveToken(clickedTokenId);
+    }
+  };
+
   return (
     <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center">
       {/* Board & Controls */}
@@ -143,68 +317,13 @@ export default function Ludo({
           </button>
         </div>
 
-        {/* Board View */}
-        <div className="w-full aspect-square border border-border/40 rounded-2xl bg-[#201F1D] p-3 flex flex-col items-center justify-center relative select-none">
-          {/* Circular Grid Track */}
-          <div className="grid grid-cols-10 grid-rows-10 w-full h-full gap-1 p-2 bg-black/40 rounded-xl">
-            {/* Render Path squares */}
-            {PATH_COORDS.map((cell, idx) => {
-              // Find if any tokens are on this square
-              const tokensOnSquare = Object.keys(positions).filter(
-                (key) => positions[key] === idx
-              );
-
-              return (
-                <div
-                  key={idx}
-                  style={{ gridRowStart: cell.r + 1, gridColumnStart: cell.c + 1 }}
-                  className={`w-full h-full rounded border flex items-center justify-center gap-0.5 flex-wrap ${
-                    idx < 10 ? "bg-red-950/40 border-red-500/20" : "bg-emerald-950/40 border-emerald-500/20"
-                  }`}
-                >
-                  {tokensOnSquare.map((tok) => (
-                    <button
-                      key={tok}
-                      onClick={() => moveToken(tok)}
-                      disabled={!isMyTurn || !hasRolled || !tok.startsWith(turn)}
-                      style={{ backgroundColor: tok.startsWith("red") ? COLORS.red : COLORS.green }}
-                      className="w-3.5 h-3.5 rounded-full border border-white ring-1 ring-black cursor-pointer hover:scale-110 active:scale-90"
-                    />
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Red Start Base */}
-          <div className="absolute top-4 left-4 p-2.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-1.5">
-            {Object.keys(positions)
-              .filter((key) => key.startsWith("red") && positions[key] === -1)
-              .map((tok) => (
-                <button
-                  key={tok}
-                  onClick={() => moveToken(tok)}
-                  disabled={!isMyTurn || !hasRolled || !tok.startsWith(turn)}
-                  style={{ backgroundColor: COLORS.red }}
-                  className="w-4 h-4 rounded-full border border-white hover:scale-110 active:scale-90 cursor-pointer"
-                />
-              ))}
-          </div>
-
-          {/* Green Start Base */}
-          <div className="absolute bottom-4 right-4 p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-1.5">
-            {Object.keys(positions)
-              .filter((key) => key.startsWith("green") && positions[key] === -1)
-              .map((tok) => (
-                <button
-                  key={tok}
-                  onClick={() => moveToken(tok)}
-                  disabled={!isMyTurn || !hasRolled || !tok.startsWith(turn)}
-                  style={{ backgroundColor: COLORS.green }}
-                  className="w-4 h-4 rounded-full border border-white hover:scale-110 active:scale-90 cursor-pointer"
-                />
-              ))}
-          </div>
+        {/* Board Canvas */}
+        <div className="w-full aspect-square border border-border/40 rounded-2xl overflow-hidden bg-[#201F1D]">
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            className={`w-full h-full block ${isMyTurn && hasRolled ? "cursor-pointer" : "cursor-not-allowed"}`}
+          />
         </div>
       </div>
 
