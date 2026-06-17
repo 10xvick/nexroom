@@ -76,7 +76,13 @@ export function useFileTransfer(
       );
 
       const progress = Math.round(((chunkIdx + 1) / task.totalChunks) * 100);
-      updateTransfer(fileId, { progress: Math.min(progress, 99) });
+      if (chunkIdx + 1 >= task.totalChunks) {
+        console.log(`[useFileTransfer:${moduleId}] Sender sent final chunk for ${fileId}`);
+        updateTransfer(fileId, { status: "completed", progress: 100 });
+        delete sendingFilesRef.current[fileId];
+      } else {
+        updateTransfer(fileId, { progress: Math.min(progress, 99) });
+      }
     };
 
     reader.readAsDataURL(task.file.slice(start, end));
