@@ -35,22 +35,25 @@ export function useFileTransfer(
   const receivingChunksRef = useRef<Record<string, { chunks: (string | undefined)[]; meta: FileMetadata; fromPeer: string }>>({});
 
   const updateTransfer = useCallback((fileId: string, update: Partial<FileTransferState>) => {
+    console.log(`[useFileTransfer:${moduleId}] updating transfer ${fileId}`, update);
     setTransfers((prev) => {
-      const existing = prev[fileId];
-      if (!existing) return prev;
+      const existing = prev[fileId] || {};
       return {
         ...prev,
-        [fileId]: { ...existing, ...update },
+        [fileId]: { ...existing, ...update } as FileTransferState,
       };
     });
     if (onTransferUpdate) {
       onTransferUpdate(fileId, update);
     }
-  }, [onTransferUpdate]);
+  }, [moduleId, onTransferUpdate]);
 
   const sendChunk = useCallback((fileId: string, chunkIdx: number, toPeerId: string) => {
     const task = sendingFilesRef.current[fileId];
-    if (!task) return;
+    if (!task) {
+      console.warn(`[useFileTransfer:${moduleId}] sendChunk: task not found for ${fileId}`);
+      return;
+    }
 
     const start = chunkIdx * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, task.file.size);
@@ -60,6 +63,7 @@ export function useFileTransfer(
       const result = e.target?.result as string;
       if (!result) return;
 
+      console.log(`[useFileTransfer:${moduleId}] Sending chunk ${chunkIdx}/${task.totalChunks - 1} for ${fileId} to ${toPeerId}`);
       sendModuleEvent(
         moduleId,
         "file:chunk",
@@ -79,11 +83,14 @@ export function useFileTransfer(
   }, [moduleId, sendModuleEvent, updateTransfer]);
 
   useEffect(() => {
+    console.log(`[useFileTransfer:${moduleId}] Registering module event handler`);
     return onModuleEvent((env) => {
       if (env.moduleId !== moduleId) return;
 
       const event = env.event;
       const data = env.payload as any;
+
+      console.log(`[useFileTransfer:${moduleId}] Received event: ${event} from ${env.from}`, data);
 
       if (event === "file:start") {
         const meta = data as FileMetadata;
@@ -112,6 +119,7 @@ export function useFileTransfer(
           onTransferUpdate(meta.fileId, newTransfer);
         }
 
+        console.log(`[useFileTransfer:${moduleId}] Acknowledging file:start for ${meta.fileId}`);
         // ACK to trigger first chunk
         sendModuleEvent(moduleId, "file:ack", { fileId: meta.fileId, chunkIndex: -1 }, env.from);
       }
@@ -119,7 +127,10 @@ export function useFileTransfer(
       else if (event === "file:chunk") {
         const { fileId, chunkIndex, data: chunkData } = data;
         const entry = receivingChunksRef.current[fileId];
-        if (!entry) return;
+        if (!entry) {
+          console.warn(`[useFileTransfer:${moduleId}] Received chunk for unknown fileId: ${fileId}`);
+          return;
+        }
 
         entry.chunks[chunkIndex] = chunkData;
         const received = entry.chunks.filter((c) => c !== undefined).length;
@@ -130,6 +141,7 @@ export function useFileTransfer(
         updateTransfer(fileId, { progress, status });
 
         if (progress === 100) {
+          console.log(`[useFileTransfer:${moduleId}] File reassembly starting for ${fileId}`);
           try {
             const byteArrays = entry.chunks.map((base64) => {
               const binary = atob(base64!);
@@ -144,6 +156,7 @@ export function useFileTransfer(
 
             updateTransfer(fileId, { status: "completed", progress: 100, downloadUrl });
             delete receivingChunksRef.current[fileId];
+            console.log(`[useFileTransfer:${moduleId}] File reassembled successfully for ${fileId}`);
           } catch (e) {
             console.error("Failed to reassemble file:", e);
             updateTransfer(fileId, { status: "failed" });
@@ -157,12 +170,16 @@ export function useFileTransfer(
       else if (event === "file:ack") {
         const { fileId, chunkIndex } = data;
         const task = sendingFilesRef.current[fileId];
-        if (!task) return;
+        if (!task) {
+          console.warn(`[useFileTransfer:${moduleId}] Received ACK for unknown fileId: ${fileId}`);
+          return;
+        }
 
         const nextChunk = chunkIndex + 1;
         if (nextChunk < task.totalChunks) {
           sendChunk(fileId, nextChunk, env.from);
         } else {
+          console.log(`[useFileTransfer:${moduleId}] Transfer completed for ${fileId}`);
           updateTransfer(fileId, { status: "completed", progress: 100 });
           delete sendingFilesRef.current[fileId];
         }
@@ -179,6 +196,7 @@ export function useFileTransfer(
 
   const startFileTransfer = useCallback((file: File, targetPeerId: string) => {
     const activePeers = Array.from(peers.values());
+    console.log(`[useFileTransfer:${moduleId}] startFileTransfer for ${file.name}, peers:`, activePeers.map(p => p.peerId));
     if (activePeers.length === 0) {
       alert("No peers in the room to share files with!");
       return null;
@@ -193,27 +211,39 @@ export function useFileTransfer(
 
     sendingFilesRef.current[fileId] = { file, totalChunks };
 
-    targets.forEach((peer) => {
-      const newTransfer: FileTransferState = {
-        fileId,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        progress: 0,
-        status: "sending",
-        direction: "send",
-        peerId: peer.peerId,
-      };
+    setTransfers((prev) => {
+      const next = { ...prev };
+      targets.forEach((peer) => {
+        next[fileId] = {
+          fileId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          progress: 0,
+          status: "sending",
+          direction: "send",
+          peerId: peer.peerId,
+        };
+      });
+      return next;
+    });
 
-      setTransfers((prev) => ({
-        ...prev,
-        [fileId]: newTransfer,
-      }));
+    targets.forEach((peer) => {
       if (onTransferUpdate) {
-        onTransferUpdate(fileId, newTransfer);
+        onTransferUpdate(fileId, {
+          fileId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          progress: 0,
+          status: "sending",
+          direction: "send",
+          peerId: peer.peerId,
+        });
       }
 
       const meta: FileMetadata = { fileId, name: file.name, size: file.size, type: file.type, totalChunks };
+      console.log(`[useFileTransfer:${moduleId}] Sending file:start for ${fileId} to ${peer.peerId}`);
       sendModuleEvent(moduleId, "file:start", meta, peer.peerId);
     });
 
