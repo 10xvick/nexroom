@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useWebRTC } from "../../core/WebRTCContext";
 import type { ModuleProps } from "../../core/types";
 import { Send } from "lucide-react";
 
@@ -10,20 +11,35 @@ interface ChatMessage {
   ts: number;
 }
 
-export default function ChatModule({ selfId, selfName, peers, sendModuleEvent, onModuleEvent }: ModuleProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export default function ChatModule({ selfId, selfName, peers, onModuleEvent }: ModuleProps) {
+  const { getModuleState, setModuleState, syncModuleState } = useWebRTC();
+  const [messages, setMessagesState] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  function setMessages(msgs: ChatMessage[]) {
+    setMessagesState(msgs);
+    messagesRef.current = msgs;
+  }
+
   useEffect(() => {
+    // Load initial cached state
+    const cached = getModuleState("chat");
+    if (cached) {
+      setMessages(cached);
+    }
+
+    // Request latest state from peers
+    syncModuleState("chat");
+
     return onModuleEvent((env) => {
       if (env.moduleId !== "chat") return;
-      if (env.event === "message") {
-        const msg = env.payload as ChatMessage;
-        setMessages((prev) => [...prev, msg]);
+      if (env.event === "state:sync") {
+        setMessages(env.payload as ChatMessage[]);
       }
     });
-  }, [onModuleEvent]);
+  }, [onModuleEvent, getModuleState, syncModuleState]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -38,8 +54,9 @@ export default function ChatModule({ selfId, selfName, peers, sendModuleEvent, o
       text: input.trim(),
       ts: Date.now(),
     };
-    setMessages((prev) => [...prev, msg]);
-    sendModuleEvent("message", msg);
+    const next = [...messagesRef.current, msg];
+    setMessages(next);
+    setModuleState("chat", next);
     setInput("");
   }
 

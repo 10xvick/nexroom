@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useWebRTC } from "../../core/WebRTCContext";
 import type { ModuleProps } from "../../core/types";
 import { Eraser, Minus, Plus, Trash2 } from "lucide-react";
 
@@ -11,6 +12,7 @@ type WBEvent =
 const COLORS = ["#ffffff", "#4f8ef7", "#22c55e", "#ef4444", "#f59e0b", "#a855f7", "#ec4899", "#000000"];
 
 export default function WhiteboardModule({ sendModuleEvent, onModuleEvent }: ModuleProps) {
+  const { getModuleState, setModuleState, syncModuleState } = useWebRTC();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [color, setColor] = useState("#ffffff");
@@ -19,6 +21,27 @@ export default function WhiteboardModule({ sendModuleEvent, onModuleEvent }: Mod
 
   const ctx = () => canvasRef.current?.getContext("2d") ?? null;
 
+  function loadCanvasImage(dataUrl: string) {
+    const img = new Image();
+    img.src = dataUrl;
+    img.onload = () => {
+      const c = canvasRef.current;
+      const g = ctx();
+      if (c && g) {
+        g.fillStyle = "#1a1f2e";
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0);
+      }
+    };
+  }
+
+  function saveCanvasState() {
+    const dataUrl = canvasRef.current?.toDataURL();
+    if (dataUrl) {
+      setModuleState("whiteboard", dataUrl);
+    }
+  }
+
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
@@ -26,11 +49,26 @@ export default function WhiteboardModule({ sendModuleEvent, onModuleEvent }: Mod
     if (!g) return;
     g.fillStyle = "#1a1f2e";
     g.fillRect(0, 0, c.width, c.height);
-  }, []);
+
+    // Load initial cached state if available
+    const cached = getModuleState("whiteboard");
+    if (cached) {
+      loadCanvasImage(cached);
+    }
+  }, [getModuleState]);
 
   useEffect(() => {
+    // Request latest canvas state from peers
+    syncModuleState("whiteboard");
+
     return onModuleEvent((env) => {
       if (env.moduleId !== "whiteboard") return;
+
+      if (env.event === "state:sync") {
+        loadCanvasImage(env.payload as string);
+        return;
+      }
+
       const ev = env.payload as WBEvent;
       const g = ctx();
       if (!g) return;
@@ -53,7 +91,7 @@ export default function WhiteboardModule({ sendModuleEvent, onModuleEvent }: Mod
         g.fillRect(0, 0, c.width, c.height);
       }
     });
-  }, [onModuleEvent]);
+  }, [onModuleEvent, syncModuleState]);
 
   function getPos(e: MouseEvent<HTMLCanvasElement>) {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -97,6 +135,7 @@ export default function WhiteboardModule({ sendModuleEvent, onModuleEvent }: Mod
     drawing.current = false;
     ctx()?.closePath();
     sendModuleEvent("stroke", { type: "end" } as WBEvent);
+    saveCanvasState();
   }
 
   function clear() {
@@ -106,6 +145,7 @@ export default function WhiteboardModule({ sendModuleEvent, onModuleEvent }: Mod
     g.fillStyle = "#1a1f2e";
     g.fillRect(0, 0, c.width, c.height);
     sendModuleEvent("stroke", { type: "clear" } as WBEvent);
+    saveCanvasState();
   }
 
   return (

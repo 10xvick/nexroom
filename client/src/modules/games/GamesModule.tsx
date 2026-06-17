@@ -1,14 +1,17 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import type { ModuleProps } from "../../core/types";
 import TicTacToe from "./TicTacToe";
-import DrawGuess from "./DrawGuess";
-import { Gamepad2 } from "lucide-react";
+import { Gamepad2, Grid3X3 } from "lucide-react";
 
-type GameId = "tictactoe" | "drawguess";
+type GameId = "tictactoe";
 
-const GAMES: { id: GameId; label: string; desc: string; emoji: string }[] = [
-  { id: "tictactoe", label: "Tic-Tac-Toe", desc: "Classic 3×3 board, 2 players", emoji: "⭕" },
-  { id: "drawguess", label: "Draw & Guess", desc: "One draws, others guess the word", emoji: "🎨" },
+const GAMES = [
+  { 
+    id: "tictactoe" as GameId, 
+    label: "Tic-Tac-Toe", 
+    desc: "Classic 3×3 board, 2 players", 
+    icon: React.createElement(Grid3X3, { size: 32, className: "text-accent mb-2" }) 
+  },
 ];
 
 export default function GamesModule(props: ModuleProps) {
@@ -26,18 +29,6 @@ export default function GamesModule(props: ModuleProps) {
     );
   }
 
-  if (activeGame === "drawguess") {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
-          <button className="btn-ghost text-xs py-1" onClick={() => setActiveGame(null)}>← Back</button>
-          <span className="text-sm font-medium">Draw & Guess</span>
-        </div>
-        <DrawGuess {...props} />
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col h-full p-6 gap-4">
       <div className="flex items-center gap-2 mb-2">
@@ -51,7 +42,7 @@ export default function GamesModule(props: ModuleProps) {
             onClick={() => setActiveGame(g.id)}
             className="glass rounded-xl p-5 text-left hover:border-accent/50 transition-all group"
           >
-            <div className="text-3xl mb-2">{g.emoji}</div>
+            <div>{g.icon}</div>
             <div className="font-semibold text-white group-hover:text-accent transition-colors">{g.label}</div>
             <div className="text-sm text-muted mt-1">{g.desc}</div>
           </button>

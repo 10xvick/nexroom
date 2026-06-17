@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useWebRTC } from "../core/WebRTCContext";
 import { getAllModules } from "../core/moduleRegistry";
 import type { ModuleEventEnvelope } from "../core/types";
@@ -8,8 +8,19 @@ export default function RoomShell() {
   const { room, selfId, selfName, peers, leaveRoom, sendModuleEvent, onModuleEvent } = useWebRTC();
   const modules = getAllModules();
   const [activeModuleId, setActiveModuleId] = useState(modules[0]?.id ?? "");
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showPeers, setShowPeers] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "Are you sure you want to leave the room?";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   const activeModule = modules.find((m) => m.id === activeModuleId);
 
@@ -41,6 +52,23 @@ export default function RoomShell() {
 
   return (
     <div className="flex flex-col h-screen bg-bg">
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass w-80 max-w-sm rounded-2xl p-6 border border-border flex flex-col gap-4 text-center">
+            <h3 className="text-lg font-bold text-white">Are you sure?</h3>
+            <p className="text-sm text-muted">Do you really want to leave this session?</p>
+            <div className="flex gap-3 justify-center mt-2">
+              <button className="btn-ghost px-4 py-2 text-sm" onClick={() => setShowLeaveConfirm(false)}>
+                Cancel
+              </button>
+              <button className="btn-danger px-4 py-2 text-sm" onClick={() => { setShowLeaveConfirm(false); leaveRoom(); }}>
+                Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar */}
       <header className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-surface/80 backdrop-blur-sm">
         <div className="text-lg font-bold text-accent mr-1">⬡</div>
@@ -80,7 +108,7 @@ export default function RoomShell() {
           )}
         </button>
 
-        <button className="btn-danger py-1 px-2" onClick={leaveRoom} title="Leave room">
+        <button className="btn-danger py-1 px-2" onClick={() => setShowLeaveConfirm(true)} title="Leave room">
           <LogOut size={14} />
         </button>
       </header>

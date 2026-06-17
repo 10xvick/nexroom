@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { useWebRTC } from "../core/WebRTCContext";
-import { decodeSignal } from "../core/signalingUtils";
 import { Copy, Plus, LogIn, Loader2, CheckCircle2, ArrowLeft, Link, Code2 } from "lucide-react";
 
 function CopyBtn({ text, label }: { text: string; label: string }) {
@@ -28,12 +27,15 @@ function CodeBox({ code, label }: { code: string; label: string }) {
   );
 }
 
-function inviteUrl(code: string) {
-  return `${window.location.origin}${window.location.pathname}#i=${encodeURIComponent(code)}`;
+function inviteUrl(code: string, method: string | null) {
+  if (method === "manual") {
+    return `${window.location.origin}${window.location.pathname}#i=${encodeURIComponent(code)}`;
+  }
+  return `${window.location.origin}${window.location.pathname}#r=${encodeURIComponent(code)}`;
 }
 
 export default function Lobby() {
-  const { phase, myCode, gatherError, startHost, startGuest, completeHandshake } = useWebRTC();
+  const { phase, myCode, gatherError, signalingMethod, startHost, startGuest, completeHandshake } = useWebRTC();
 
   const [name, setName] = useState(localStorage.getItem("nexroom_name") || "");
   const [roomName, setRoomName] = useState("");
@@ -49,16 +51,26 @@ export default function Lobby() {
 
   // ── Detect invite URL on mount ───────────────────────────────────────────────
   useEffect(() => {
+    // Check manual invite link
     const match = window.location.hash.match(/[#&]i=([^&]+)/);
-    if (!match) return;
-    const code = decodeURIComponent(match[1]);
-    try {
-      const payload = decodeSignal(code);
+    if (match) {
+      const code = decodeURIComponent(match[1]);
       setPendingOfferCode(code);
-      setPendingRoomName(payload.roomName);
+      setPendingRoomName("Manual Room Invite");
       setView("join_url");
-      window.history.replaceState(null, "", window.location.pathname); // clean URL
-    } catch (_) {}
+      window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
+
+    // Check automatic room code link (#r=ROOMCODE)
+    const rMatch = window.location.hash.match(/[#&]r=([^&]+)/);
+    if (rMatch) {
+      const code = decodeURIComponent(rMatch[1]);
+      setPendingOfferCode(code);
+      setPendingRoomName(`Room Code: ${code}`);
+      setView("join_url");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   }, []);
 
   // ── Auto-join when name is set in URL-invite view ───────────────────────────
@@ -74,7 +86,7 @@ export default function Lobby() {
     await startHost(name.trim(), roomName.trim() || `${name.trim()}'s Room`);
   }
 
-  async function handleManualJoin() {
+  async function handleJoin() {
     if (!name.trim() || !manualOfferInput.trim()) return;
     await startGuest(manualOfferInput.trim(), name.trim());
   }
@@ -84,7 +96,7 @@ export default function Lobby() {
     await completeHandshake(answerInput.trim());
   }
 
-  const url = myCode ? inviteUrl(myCode) : "";
+  const url = myCode ? inviteUrl(myCode, signalingMethod) : "";
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-bg">
@@ -105,12 +117,16 @@ export default function Lobby() {
           <div className="glass rounded-2xl p-8 flex flex-col items-center gap-3">
             <Loader2 size={28} className="text-accent animate-spin" />
             <p className="text-sm text-white font-medium">Setting up connection…</p>
-            <p className="text-xs text-muted text-center">STUN servers discovering your network path. Takes a few seconds.</p>
+            <p className="text-xs text-muted text-center">
+              {signalingMethod === "manual"
+                ? "STUN servers discovering your network path. Takes a few seconds."
+                : "Establishing secure automated signaling link..."}
+            </p>
           </div>
         )}
 
-        {/* ── offer_ready: host shares invite link ── */}
-        {phase === "offer_ready" && (
+        {/* ── offer_ready: host shares manual invite link ── */}
+        {phase === "offer_ready" && signalingMethod === "manual" && (
           <div className="glass rounded-2xl p-6 space-y-5">
             <p className="text-sm font-semibold text-white">Step 1 — Send this invite link</p>
             <p className="text-xs text-muted">Share the link via any channel. When they open it, their answer code will be generated automatically.</p>
@@ -142,13 +158,23 @@ export default function Lobby() {
           </div>
         )}
 
-        {/* ── answer_ready: guest shows answer code ── */}
+        {/* ── answer_ready: guest shows answer code or waits for handshake ── */}
         {phase === "answer_ready" && (
           <div className="glass rounded-2xl p-6 space-y-4">
-            <p className="text-sm font-semibold text-white">Send this answer code back</p>
-            <p className="text-xs text-muted">Copy this and send it back to the person who shared the invite link.</p>
-            <CodeBox code={myCode} label="Your answer code" />
-            <div className="flex items-center gap-2 text-xs text-muted/60 bg-surface/50 rounded-lg px-3 py-2">
+            {signalingMethod === "manual" ? (
+              <>
+                <p className="text-sm font-semibold text-white">Send this answer code back</p>
+                <p className="text-xs text-muted">Copy this and send it back to the person who shared the invite link.</p>
+                <CodeBox code={myCode} label="Your answer code" />
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-center py-4">
+                <Loader2 size={28} className="text-accent animate-spin" />
+                <p className="text-sm text-white font-medium">Connecting automatically...</p>
+                <p className="text-xs text-muted">Performing secure handshake with Host using {signalingMethod}.</p>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs text-muted/60 bg-surface/50 rounded-lg px-3 py-2 justify-center">
               <Loader2 size={12} className="animate-spin shrink-0" />
               Waiting for the host to accept…
             </div>
@@ -191,7 +217,7 @@ export default function Lobby() {
             </button>
             <button className="btn-ghost w-full justify-center border-accent/30 text-accent hover:bg-accent/10"
               onClick={() => setView("join_manual")} disabled={!name.trim()}>
-              <Code2 size={16} /> Join with Code
+              <Code2 size={16} /> Join Room / Code
             </button>
           </div>
         )}
@@ -208,28 +234,28 @@ export default function Lobby() {
               <input type="text" className="w-full" placeholder={`${name.trim()}'s Room`}
                 value={roomName} onChange={(e) => setRoomName(e.target.value)} />
             </div>
-            <p className="text-xs text-muted">A shareable invite link will be generated. Anyone with the link can join.</p>
+            <p className="text-xs text-muted">A room code or manual link will be generated automatically to share with your peer.</p>
             {gatherError && <p className="text-xs text-danger">{gatherError}</p>}
             <button className="btn-primary w-full justify-center" onClick={handleCreate}>
-              <Plus size={16} /> Generate Invite Link
+              <Plus size={16} /> Create Room
             </button>
           </div>
         )}
 
-        {/* ── join manual (fallback) ── */}
+        {/* ── join manual (supports 6-character room codes AND base64 manual strings) ── */}
         {phase === "idle" && view === "join_manual" && (
           <div className="glass rounded-2xl p-6 space-y-4">
             <div className="flex items-center gap-2">
               <button onClick={() => setView("home")} className="text-muted hover:text-white"><ArrowLeft size={16} /></button>
-              <p className="text-sm font-semibold text-white">Join with Code</p>
+              <p className="text-sm font-semibold text-white">Join a Room</p>
             </div>
-            <p className="text-xs text-muted">If you received a raw invite code (not a link), paste it here.</p>
+            <p className="text-xs text-muted">Enter a 6-character Room Code, or paste a manual invite code if using offline fallback.</p>
             <textarea rows={5} className="w-full font-mono text-xs resize-none"
-              placeholder="Paste invite code here…"
+              placeholder="Paste Room Code (e.g. A3B89C) or manual invite string here…"
               value={manualOfferInput} onChange={(e) => setManualOfferInput(e.target.value)} />
             {gatherError && <p className="text-xs text-danger">{gatherError}</p>}
-            <button className="btn-primary w-full justify-center" onClick={handleManualJoin} disabled={!manualOfferInput.trim()}>
-              <LogIn size={16} /> Generate Answer
+            <button className="btn-primary w-full justify-center" onClick={handleJoin} disabled={!manualOfferInput.trim()}>
+              <LogIn size={16} /> Connect
             </button>
           </div>
         )}

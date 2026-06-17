@@ -30,7 +30,7 @@ export interface ModuleEventEnvelope {
 export interface NexModule {
   id: string;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   description: string;
   component: ComponentType<ModuleProps>;
   /** optional: called when module becomes active */

@@ -23,8 +23,6 @@
 
 ```
 windsurf-project/
-├── server/          # Local signaling server (Socket.io)
-│   └── index.js
 └── client/          # React + TS + Vite frontend
     └── src/
         ├── core/
@@ -63,15 +61,9 @@ Delete its `registerModule()` call from `src/modules/index.ts`.
 
 ## Local Development
 
-### 1. Start the signaling server
-```bash
-cd server
-npm install
-npm run dev
-# → http://localhost:4000
-```
+Only the client needs to be started as signaling is handled by public cloud infrastructure.
 
-### 2. Start the client
+### Start the client
 ```bash
 cd client
 npm install
@@ -79,7 +71,7 @@ npm run dev
 # → http://localhost:5173
 ```
 
-Open the app, enter a name, create a room, share the Room ID with peers on the same network. The signaling server only handles the WebRTC handshake — all subsequent data flows peer-to-peer.
+Open the app, enter a name, create a room, and share the Room ID with peers. The app will automatically establish a WebRTC connection using public signaling brokers.
 
 ---
 
@@ -91,13 +83,27 @@ The GitHub Actions workflow (`.github/workflows/deploy.yml`) builds the client o
 
 ---
 
-## Data flow
+## Signaling & Network Architecture
+
+nexroom operates as a **fully serverless application**. It does not require hosting or running a custom signaling server. Instead, it utilizes a tiered signaling and peer discovery protocol to establish WebRTC connections:
+
+1. **MQTT Protocol (Tier 1)**: Attempts connection to a secure public MQTT broker (`wss://broker.emqx.io:8084/mqtt`).
+2. **PeerJS Cloud (Tier 2)**: Falls back to the public PeerJS cloud signaling framework if MQTT is blocked.
+3. **Manual Handshake (Tier 3)**: Ultimate fallback using base64-encoded copy-paste connection tokens.
+
+### Global Connectivity (Not Same-Network Only)
+Because signaling coordinates via public cloud gateways (EMQX secure MQTT broker and PeerJS servers), **peers do not need to be on the same local network**. 
+
+* **Signaling**: Connects globally across different networks, cellular data, and home Wi-Fi using secure WebSockets (`wss://`).
+* **WebRTC Connection**: Direct P2P channels are created using public Google STUN servers (`stun.l.google.com:19302`) to resolve and traverse NAT/firewalls.
+
+### Data Flow
 
 ```
-Peer A ──[SDP offer]──▶ signaling server ──▶ Peer B
-Peer A ◀──[SDP answer]── signaling server ◀── Peer B
-Peer A ◀──────────── WebRTC DataChannel (P2P) ──────────── Peer B
-       ◀──────────── WebRTC Media streams (P2P) ──────────▶
+Peer A ──[SDP/ICE Offer (via MQTT/PeerJS)]──▶ Public Broker ──▶ Peer B
+Peer A ◀──[SDP/ICE Answer (via MQTT/PeerJS)]─ Public Broker ◀── Peer B
+Peer A ◀─────────────────── Direct WebRTC P2P DataChannel ───────────────────▶ Peer B
+       ◀─────────────────── Direct WebRTC Media Streams (Video/Audio) ──────▶
 ```
 
-After the initial handshake, the signaling server carries zero traffic.
+Once the initial handshake succeeds, all real-time session traffic (drawings, chat messages, playback logs, video/audio) is carried **100% peer-to-peer (P2P)** directly between the browsers, maintaining complete data privacy.

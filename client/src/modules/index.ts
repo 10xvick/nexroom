@@ -1,9 +1,11 @@
+import React from "react";
 import { registerModule } from "../core/moduleRegistry";
 import ChatModule from "./chat/ChatModule";
 import CollabModule from "./collab/CollabModule";
 import WatchPartyModule from "./watchparty/WatchPartyModule";
 import GamesModule from "./games/GamesModule";
 import WhiteboardModule from "./whiteboard/WhiteboardModule";
+import { MessageSquare, Code2, Tv, Gamepad2, Palette } from "lucide-react";
 
 // ─── Register all built-in modules ───────────────────────────────────────────
 // To add a new module: import its component and call registerModule() here.
@@ -12,7 +14,7 @@ import WhiteboardModule from "./whiteboard/WhiteboardModule";
 registerModule({
   id: "chat",
   label: "Chat",
-  icon: "💬",
+  icon: React.createElement(MessageSquare, { size: 20 }),
   description: "Real-time text messaging",
   component: ChatModule,
 });
@@ -20,7 +22,7 @@ registerModule({
 registerModule({
   id: "collab",
   label: "Code",
-  icon: "⌨️",
+  icon: React.createElement(Code2, { size: 20 }),
   description: "Live collaborative code editor",
   component: CollabModule,
 });
@@ -28,7 +30,7 @@ registerModule({
 registerModule({
   id: "watchparty",
   label: "Watch Party",
-  icon: "🎬",
+  icon: React.createElement(Tv, { size: 20 }),
   description: "Synchronized YouTube viewing",
   component: WatchPartyModule,
 });
@@ -36,7 +38,7 @@ registerModule({
 registerModule({
   id: "games",
   label: "Games",
-  icon: "🎮",
+  icon: React.createElement(Gamepad2, { size: 20 }),
   description: "Multiplayer mini-games",
   component: GamesModule,
 });
@@ -44,7 +46,7 @@ registerModule({
 registerModule({
   id: "whiteboard",
   label: "Whiteboard",
-  icon: "🖊️",
+  icon: React.createElement(Palette, { size: 20 }),
   description: "Collaborative drawing canvas",
   component: WhiteboardModule,
 });

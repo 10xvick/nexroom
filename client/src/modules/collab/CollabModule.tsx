@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { useWebRTC } from "../../core/WebRTCContext";
 import type { ModuleProps } from "../../core/types";
 import { Code2, Play } from "lucide-react";
 
@@ -12,12 +13,38 @@ interface CodeOp {
 }
 
 export default function CollabModule({ selfId, sendModuleEvent, onModuleEvent }: ModuleProps) {
-  const [code, setCode] = useState("// Start coding together!\n");
-  const [lang, setLang] = useState("typescript");
+  const { getModuleState, setModuleState, syncModuleState } = useWebRTC();
+  const [code, setCodeState] = useState("// Start coding together!\n");
+  const [lang, setLangState] = useState("typescript");
   const [output, setOutput] = useState<string | null>(null);
   const suppressRef = useRef(false);
 
+  const codeRef = useRef(code);
+  const langRef = useRef(lang);
+
+  function setCode(val: string) {
+    setCodeState(val);
+    codeRef.current = val;
+  }
+
+  function setLang(val: string) {
+    setLangState(val);
+    langRef.current = val;
+  }
+
   useEffect(() => {
+    // Load initial cached state if available
+    const cached = getModuleState("collab");
+    if (cached) {
+      suppressRef.current = true;
+      setCode(cached.code);
+      setLang(cached.lang);
+      suppressRef.current = false;
+    }
+
+    // Request latest state from peers
+    syncModuleState("collab");
+
     return onModuleEvent((env) => {
       if (env.moduleId !== "collab") return;
       if (env.event === "op" && env.from !== selfId) {
@@ -26,21 +53,29 @@ export default function CollabModule({ selfId, sendModuleEvent, onModuleEvent }:
         setCode(op.value);
         setLang(op.lang);
         suppressRef.current = false;
+      } else if (env.event === "state:sync") {
+        const payload = env.payload as { code: string; lang: string };
+        suppressRef.current = true;
+        setCode(payload.code);
+        setLang(payload.lang);
+        suppressRef.current = false;
       }
     });
-  }, [onModuleEvent, selfId]);
+  }, [onModuleEvent, selfId, getModuleState, syncModuleState]);
 
   function handleChange(val: string | undefined) {
     const v = val ?? "";
     setCode(v);
     if (!suppressRef.current) {
-      sendModuleEvent("op", { value: v, lang, from: selfId } as CodeOp);
+      sendModuleEvent("op", { value: v, lang: langRef.current, from: selfId } as CodeOp);
+      setModuleState("collab", { code: v, lang: langRef.current });
     }
   }
 
   function handleLangChange(l: string) {
     setLang(l);
-    sendModuleEvent("op", { value: code, lang: l, from: selfId } as CodeOp);
+    sendModuleEvent("op", { value: codeRef.current, lang: l, from: selfId } as CodeOp);
+    setModuleState("collab", { code: codeRef.current, lang: l });
   }
 
   function runCode() {
