@@ -10,11 +10,12 @@
 
 | Module | Description |
 |--------|-------------|
-| 🎥 Video Chat | Live video/audio + screen sharing via WebRTC |
+| 🎥 Video Chat | Live video/audio + screen sharing via WebRTC (permissions deferred until explicit user toggle) |
 | 💬 Chat | Real-time text messaging over DataChannels |
 | ⌨️ Code Collab | Monaco editor synced P2P across all peers |
-| 🎬 Watch Party | Synchronized YouTube playback |
-| 🎮 Games | Tic-Tac-Toe + Draw & Guess (pluggable) |
+| 🎬 Watch Party | Synchronized YouTube playback with reactions and embedded chat |
+| 🎮 Games | State-synced Tic-Tac-Toe, Chess, and Ludo boards with seat roles |
+| 📁 File Share | P2P chunked (16KB base64) file sharing tab over WebRTC |
 | 🖊️ Whiteboard | Collaborative drawing canvas |
 
 ---

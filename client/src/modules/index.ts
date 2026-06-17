@@ -5,7 +5,8 @@ import CollabModule from "./collab/CollabModule";
 import WatchPartyModule from "./watchparty/WatchPartyModule";
 import GamesModule from "./games/GamesModule";
 import WhiteboardModule from "./whiteboard/WhiteboardModule";
-import { MessageSquare, Code2, Tv, Gamepad2, Palette } from "lucide-react";
+import FileSharingModule from "./filesharing/FileSharingModule";
+import { MessageSquare, Code2, Tv, Gamepad2, Palette, FolderUp } from "lucide-react";
 
 // ─── Register all built-in modules ───────────────────────────────────────────
 // To add a new module: import its component and call registerModule() here.
@@ -49,4 +50,12 @@ registerModule({
   icon: React.createElement(Palette, { size: 20 }),
   description: "Collaborative drawing canvas",
   component: WhiteboardModule,
+});
+
+registerModule({
+  id: "filesharing",
+  label: "File Share",
+  icon: React.createElement(FolderUp, { size: 20 }),
+  description: "Direct P2P file sharing",
+  component: FileSharingModule,
 });

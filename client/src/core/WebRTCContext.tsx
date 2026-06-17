@@ -76,10 +76,12 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
   const [selfName, setSelfName] = useState("");
   const [peers, setPeers] = useState<Map<string, PeerConnection>>(new Map());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [camEnabled, setCamEnabled] = useState(true);
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [camEnabled, setCamEnabled] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [signalingMethod, setSignalingMethod] = useState<"mqtt" | "peerjs" | "manual" | null>(null);
+
+  const hasRealMediaRef = useRef(false);
 
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -143,23 +145,84 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setPeers(new Map(peersRef.current));
   }
 
-  // ── Media ───────────────────────────────────────────────────────────────────
-
-  async function acquireMedia() {
-    if (localStreamRef.current) return;
+  function initializeDummyStream() {
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      localStreamRef.current = s;
-      setLocalStream(s);
-    } catch {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        localStreamRef.current = s;
-        setLocalStream(s);
-      } catch {
-        localStreamRef.current = new MediaStream();
-        setLocalStream(localStreamRef.current);
+      // Dummy Video
+      const canvas = document.createElement("canvas");
+      canvas.width = 2;
+      canvas.height = 2;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, 2, 2);
       }
+      const videoStream = (canvas as any).captureStream ? (canvas as any).captureStream(1) : new MediaStream();
+      const dummyVideo = videoStream.getVideoTracks()[0];
+
+      // Dummy Audio
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const dst = audioCtx.createMediaStreamDestination();
+      oscillator.connect(dst);
+      oscillator.start();
+      const dummyAudio = dst.stream.getAudioTracks()[0];
+      
+      if (dummyAudio) dummyAudio.enabled = false;
+      if (dummyVideo) dummyVideo.enabled = false;
+
+      const stream = new MediaStream();
+      if (dummyVideo) stream.addTrack(dummyVideo);
+      if (dummyAudio) stream.addTrack(dummyAudio);
+
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      setMicEnabled(false);
+      setCamEnabled(false);
+      hasRealMediaRef.current = false;
+    } catch (e) {
+      console.error("Failed to initialize dummy stream:", e);
+      localStreamRef.current = new MediaStream();
+      setLocalStream(localStreamRef.current);
+    }
+  }
+
+  async function acquireRealMedia(enableMic: boolean, enableCam: boolean) {
+    try {
+      const realStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      hasRealMediaRef.current = true;
+
+      const realVideo = realStream.getVideoTracks()[0];
+      const realAudio = realStream.getAudioTracks()[0];
+
+      if (realAudio) realAudio.enabled = enableMic;
+      if (realVideo) realVideo.enabled = enableCam;
+
+      setMicEnabled(enableMic);
+      setCamEnabled(enableCam);
+
+      const stream = new MediaStream();
+      if (realVideo) stream.addTrack(realVideo);
+      if (realAudio) stream.addTrack(realAudio);
+
+      // Stop old dummy tracks
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+
+      // Update senders on all active connections
+      peersRef.current.forEach((conn) => {
+        conn.pc.getSenders().forEach((sender) => {
+          if (sender.track?.kind === "video" && realVideo) {
+            sender.replaceTrack(realVideo);
+          }
+          if (sender.track?.kind === "audio" && realAudio) {
+            sender.replaceTrack(realAudio);
+          }
+        });
+      });
+    } catch (err) {
+      console.error("Failed to acquire real media:", err);
     }
   }
 
@@ -308,7 +371,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setMyCode(roomId);
 
     try {
-      await acquireMedia();
+      initializeDummyStream();
       console.log("Attempting MQTT signaling...");
       const client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
         connectTimeout: 4000,
@@ -546,7 +609,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setGatherError("");
 
     try {
-      await acquireMedia();
+      initializeDummyStream();
       console.log("Guest attempting MQTT signaling for:", upperCode);
       const client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
         connectTimeout: 4000,
@@ -783,14 +846,28 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setIsScreenSharing(false);
   }
 
-  function toggleMic() {
-    localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
-    setMicEnabled((v) => !v);
+  async function toggleMic() {
+    if (!hasRealMediaRef.current) {
+      await acquireRealMedia(true, camEnabled);
+      return;
+    }
+    const track = localStreamRef.current?.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setMicEnabled(track.enabled);
+    }
   }
 
-  function toggleCam() {
-    localStreamRef.current?.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; });
-    setCamEnabled((v) => !v);
+  async function toggleCam() {
+    if (!hasRealMediaRef.current) {
+      await acquireRealMedia(micEnabled, true);
+      return;
+    }
+    const track = localStreamRef.current?.getVideoTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setCamEnabled(track.enabled);
+    }
   }
 
   async function startScreenShare() {
