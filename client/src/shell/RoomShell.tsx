@@ -133,21 +133,28 @@ export default function RoomShell() {
         </nav>
 
         {/* Module area */}
-        <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
-          {activeModule ? (
-            <activeModule.component
-              room={room}
-              selfId={selfId}
-              selfName={selfName}
-              peers={peers}
-              sendModuleEvent={sendForModule}
-              onModuleEvent={onForModule}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-muted text-sm">
-              No module selected
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden relative">
+          {modules.map((m) => (
+            <div
+              key={m.id}
+              className={`h-full w-full ${m.id === activeModuleId ? "block" : "hidden"}`}
+            >
+              <m.component
+                room={room}
+                selfId={selfId}
+                selfName={selfName}
+                peers={peers}
+                sendModuleEvent={(event: string, payload: unknown, to?: string) => {
+                  sendModuleEvent(m.id, event, payload, to);
+                }}
+                onModuleEvent={(handler: (env: ModuleEventEnvelope) => void) => {
+                  return onModuleEvent((env) => {
+                    if (env.moduleId === m.id) handler(env);
+                  });
+                }}
+              />
             </div>
-          )}
+          ))}
         </main>
       </div>
     </div>
