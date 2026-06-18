@@ -18,24 +18,40 @@ jobs:
     steps:
       - name: Checkout nexroom source
         uses: actions/checkout@v6
+        with:
+          path: nexroom
+
+      - name: Checkout shared-chat
+        uses: actions/checkout@v6
+        with:
+          repository: 10xvick/shared-chat
+          path: shared-chat
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: client/package-lock.json
+          cache-dependency-path: nexroom/client/package-lock.json
 
       - name: Upgrade npm
         run: npm install -g npm@11
 
+      - name: Install shared-chat dependencies
+        run: npm install
+        working-directory: shared-chat
+
+      - name: Build shared-chat
+        run: npm run build
+        working-directory: shared-chat
+
       - name: Install client dependencies
         run: npm install
-        working-directory: client
+        working-directory: nexroom/client
 
-      - name: Build
+      - name: Build client
         run: npm run build
-        working-directory: client
+        working-directory: nexroom/client
 
       - name: Checkout 10xvick.github.io
         uses: actions/checkout@v6
@@ -48,7 +64,7 @@ jobs:
         run: mkdir -p pages-repo/tools/social/nexroom
 
       - name: Copy built files
-        run: cp -r client/dist/. pages-repo/tools/social/nexroom/
+        run: cp -r nexroom/client/dist/. pages-repo/tools/social/nexroom/
 
       - name: Configure git
         working-directory: pages-repo
