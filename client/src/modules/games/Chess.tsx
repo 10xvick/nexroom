@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { ModuleProps } from "../../core/types";
 import type { GameState } from "./GamesModule";
-import { User, ShieldAlert } from "lucide-react";
+import { User, ShieldAlert, Award, Play } from "lucide-react";
 
 interface ChessProps extends ModuleProps {
   gameState: GameState;
@@ -10,11 +10,127 @@ interface ChessProps extends ModuleProps {
   leaveRole: (role: string) => void;
 }
 
-// Maps piece abbreviation to unicode character
-const PIECES: Record<string, string> = {
-  wP: "♙", wR: "♖", wN: "♘", wB: "♗", wQ: "♕", wK: "♔",
-  bP: "♟", bR: "♜", bN: "♞", bB: "♝", bQ: "♛", bK: "♚"
-};
+// Programmatic path drawer for Chess pieces
+function drawPiece(ctx: CanvasRenderingContext2D, piece: string, x: number, y: number, size: number) {
+  const isWhite = piece.startsWith("w");
+  const type = piece.slice(1);
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Setup styles
+  ctx.strokeStyle = isWhite ? "#1e293b" : "#f8fafc";
+  ctx.lineWidth = size * 0.05;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // Fill gradient
+  const grad = ctx.createRadialGradient(0, -size * 0.05, 0, 0, 0, size * 0.45);
+  if (isWhite) {
+    grad.addColorStop(0, "#ffffff");
+    grad.addColorStop(1, "#cbd5e1");
+  } else {
+    grad.addColorStop(0, "#334155");
+    grad.addColorStop(1, "#0f172a");
+  }
+  ctx.fillStyle = grad;
+
+  // Add subtle drop shadow
+  ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 3;
+
+  ctx.beginPath();
+
+  const r = size * 0.35; // base bounds radius
+
+  if (type === "P") {
+    // Pawn
+    ctx.arc(0, -size * 0.18, size * 0.15, 0, Math.PI * 2); // Head
+    ctx.moveTo(-size * 0.1, -size * 0.03); // Collar
+    ctx.lineTo(size * 0.1, -size * 0.03);
+    ctx.lineTo(size * 0.15, size * 0.25); // Base
+    ctx.lineTo(-size * 0.15, size * 0.25);
+    ctx.closePath();
+  } else if (type === "R") {
+    // Rook
+    ctx.moveTo(-size * 0.18, -size * 0.25); // Top battlements
+    ctx.lineTo(-size * 0.18, -size * 0.12);
+    ctx.lineTo(-size * 0.08, -size * 0.12);
+    ctx.lineTo(-size * 0.08, -size * 0.25);
+    ctx.lineTo(size * 0.08, -size * 0.25);
+    ctx.lineTo(size * 0.08, -size * 0.12);
+    ctx.lineTo(size * 0.18, -size * 0.12);
+    ctx.lineTo(size * 0.18, -size * 0.25);
+    // Body and Base
+    ctx.lineTo(size * 0.2, size * 0.25);
+    ctx.lineTo(-size * 0.2, size * 0.25);
+    ctx.closePath();
+  } else if (type === "N") {
+    // Knight (Horse head)
+    ctx.moveTo(-size * 0.15, size * 0.25); // base bottom-left
+    ctx.lineTo(size * 0.18, size * 0.25); // base bottom-right
+    ctx.quadraticCurveTo(size * 0.18, size * 0.05, size * 0.1, -size * 0.05); // neck curve right
+    ctx.lineTo(size * 0.2, -size * 0.15); // snout bottom
+    ctx.lineTo(size * 0.08, -size * 0.28); // snout top
+    ctx.quadraticCurveTo(-size * 0.08, -size * 0.32, -size * 0.05, -size * 0.15); // forehead / nose bridge
+    ctx.lineTo(-size * 0.15, -size * 0.22); // ear back
+    ctx.quadraticCurveTo(-size * 0.15, size * 0.05, -size * 0.15, size * 0.25); // back neck curve
+    ctx.closePath();
+  } else if (type === "B") {
+    // Bishop (Mitre hat)
+    ctx.arc(0, -size * 0.22, size * 0.05, 0, Math.PI * 2); // Cross-globe on top
+    // Body mitre shape
+    ctx.moveTo(0, -size * 0.17);
+    ctx.bezierCurveTo(-size * 0.2, -size * 0.12, -size * 0.18, size * 0.15, -size * 0.18, size * 0.25);
+    ctx.lineTo(size * 0.18, size * 0.25);
+    ctx.bezierCurveTo(size * 0.18, size * 0.15, size * 0.2, -size * 0.12, 0, -size * 0.17);
+    ctx.closePath();
+  } else if (type === "Q") {
+    // Queen (Spiked crown)
+    ctx.moveTo(-size * 0.22, size * 0.25);
+    ctx.lineTo(-size * 0.22, -size * 0.1);
+    ctx.lineTo(-size * 0.12, -size * 0.25);
+    ctx.lineTo(-size * 0.05, -size * 0.1);
+    ctx.lineTo(0, -size * 0.28); // center peak
+    ctx.lineTo(size * 0.05, -size * 0.1);
+    ctx.lineTo(size * 0.12, -size * 0.25);
+    ctx.lineTo(size * 0.22, -size * 0.1);
+    ctx.lineTo(size * 0.22, size * 0.25);
+    ctx.closePath();
+  } else if (type === "K") {
+    // King (Crown + cross)
+    // Cross
+    ctx.moveTo(-size * 0.05, -size * 0.26);
+    ctx.lineTo(size * 0.05, -size * 0.26);
+    ctx.moveTo(0, -size * 0.31);
+    ctx.lineTo(0, -size * 0.21);
+    // Base crown
+    ctx.moveTo(-size * 0.2, size * 0.25);
+    ctx.lineTo(-size * 0.2, -size * 0.1);
+    ctx.lineTo(0, -size * 0.18);
+    ctx.lineTo(size * 0.2, -size * 0.1);
+    ctx.lineTo(size * 0.2, size * 0.25);
+    ctx.closePath();
+  }
+
+  ctx.fill();
+  ctx.shadowBlur = 0; // disable shadow for stroke border
+  ctx.stroke();
+
+  // Draw minor detail details
+  if (type === "B") {
+    // Diagonal slit for Bishop mitre
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.05, -size * 0.05);
+    ctx.lineTo(size * 0.08, -size * 0.12);
+    ctx.strokeStyle = isWhite ? "#475569" : "#94a3b8";
+    ctx.lineWidth = size * 0.035;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
 
 export default function Chess({
   selfId,
@@ -108,40 +224,36 @@ export default function Chess({
         const isDark = (r + c) % 2 === 1;
         const isSelected = selectedCell?.[0] === r && selectedCell?.[1] === c;
 
-        // Draw square cell
-        ctx.fillStyle = isDark ? "#302E2B" : "#F0D9B5";
-        ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+        // Draw square cell with subtle gradients
+        const sx = c * cellSize;
+        const sy = r * cellSize;
+        const grad = ctx.createLinearGradient(sx, sy, sx + cellSize, sy + cellSize);
+        if (isDark) {
+          grad.addColorStop(0, "#48382c"); // Dark wood/ceramic color
+          grad.addColorStop(1, "#362921");
+        } else {
+          grad.addColorStop(0, "#f3dfc2"); // Light wood/ceramic color
+          grad.addColorStop(1, "#e2ca9c");
+        }
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(sx, sy, cellSize, cellSize);
 
         // Highlight selection
         if (isSelected) {
-          ctx.fillStyle = "rgba(59, 130, 246, 0.35)"; // Tailwind blue highlight
-          ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
-          ctx.strokeStyle = "#3b82f6";
-          ctx.lineWidth = 3;
-          ctx.strokeRect(c * cellSize + 1.5, r * cellSize + 1.5, cellSize - 3, cellSize - 3);
+          ctx.fillStyle = "rgba(79, 142, 247, 0.4)";
+          ctx.fillRect(sx, sy, cellSize, cellSize);
+          ctx.strokeStyle = "#4f8ef7";
+          ctx.lineWidth = 2.5;
+          ctx.strokeRect(sx + 1.25, sy + 1.25, cellSize - 2.5, cellSize - 2.5);
         }
 
-        // Draw piece text
+        // Draw piece vectors programmatically
         const piece = board[r][c];
         if (piece) {
-          ctx.font = `${cellSize * 0.7}px "Segoe UI Symbol", Symbola, "DejaVu Sans", sans-serif`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-
-          const char = PIECES[piece];
           const px = c * cellSize + cellSize / 2;
           const py = r * cellSize + cellSize / 2;
-
-          if (piece.startsWith("w")) {
-            ctx.fillStyle = "#ffffff";
-            ctx.shadowColor = "rgba(0,0,0,0.85)";
-            ctx.shadowBlur = 4;
-            ctx.fillText(char, px, py);
-            ctx.shadowBlur = 0;
-          } else {
-            ctx.fillStyle = "#000000";
-            ctx.fillText(char, px, py);
-          }
+          drawPiece(ctx, piece, px, py, cellSize);
         }
       }
     }
@@ -165,81 +277,84 @@ export default function Chess({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center">
+    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center animate-fade-in">
       {/* Chess Board Column */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-[440px]">
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-[440px] w-full">
         {/* Status Indicator */}
-        <div className="text-center bg-surface/30 border border-border/40 rounded-xl p-3 w-full backdrop-blur-sm">
+        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-4 w-full backdrop-blur-md shadow-md">
           {myRole ? (
             isMyTurn ? (
-              <span className="text-accent font-semibold animate-pulse">Your Turn ({myRole === "w" ? "White" : "Black"})</span>
+              <span className="text-accent font-extrabold flex items-center justify-center gap-2 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
+                Your turn! ({myRole === "w" ? "White" : "Black"})
+              </span>
             ) : (
-              <span>Waiting for opponent... ({turn === "w" ? "White" : "Black"}'s Turn)</span>
+              <span className="font-semibold text-muted">Waiting for opponent... ({turn === "w" ? "White" : "Black"}'s Turn)</span>
             )
           ) : (
-            <span className="text-muted flex items-center justify-center gap-1.5">
-              <ShieldAlert size={14} /> Spectator Mode
+            <span className="text-muted flex items-center justify-center gap-1.5 uppercase text-xs tracking-wider font-bold">
+              <ShieldAlert size={14} className="text-muted" /> Spectator Mode
             </span>
           )}
         </div>
 
         {/* 8x8 Canvas Board */}
-        <div className="w-full aspect-square border border-border/40 rounded-2xl overflow-hidden shadow-2xl bg-surface/10 p-2">
+        <div className="w-full aspect-square border border-border/40 rounded-3xl overflow-hidden shadow-2xl bg-[#12141c]/50 p-2.5">
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
-            className={`w-full h-full block ${myRole ? "cursor-pointer" : "cursor-not-allowed"}`}
+            className={`w-full h-full block rounded-2xl ${myRole ? "cursor-pointer" : "cursor-not-allowed"}`}
           />
         </div>
       </div>
 
       {/* Control panel and history */}
-      <div className="w-full lg:w-64 flex flex-col gap-4 bg-surface/20 border border-border/40 rounded-2xl p-4">
+      <div className="w-full lg:w-72 flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md">
         {/* Seats */}
         <div>
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2.5">Seats</h4>
+          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3 select-none">Seats</h4>
           <div className="space-y-2.5">
             {/* White Player */}
-            <div className="flex items-center justify-between p-2.5 rounded-xl border border-border/20 bg-surface/30">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-4 h-4 rounded bg-white border border-border/60" />
-                <span className="text-xs font-semibold text-white truncate max-w-[120px]">
-                  {playerWhite ? getPeerName(playerWhite) : "Vacant"}
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-4.5 h-4.5 rounded bg-white border border-border/60 shadow-inner" />
+                <span className="text-xs font-bold text-white truncate max-w-[120px]">
+                  {playerWhite ? getPeerName(playerWhite) : "Vacant Seat"}
                 </span>
               </div>
               {playerWhite ? (
                 playerWhite === selfId && (
-                  <button className="text-[10px] text-danger hover:underline" onClick={() => leaveRole("white")}>
+                  <button className="text-[10px] text-danger hover:underline font-bold" onClick={() => leaveRole("white")}>
                     Leave
                   </button>
                 )
               ) : (
                 !myRole && (
-                  <button className="text-[10px] text-accent hover:underline font-bold" onClick={() => joinRole("white")}>
-                    Sit
+                  <button className="text-[10px] text-accent hover:underline font-extrabold uppercase tracking-wide" onClick={() => joinRole("white")}>
+                    Sit White
                   </button>
                 )
               )}
             </div>
 
             {/* Black Player */}
-            <div className="flex items-center justify-between p-2.5 rounded-xl border border-border/20 bg-surface/30">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-4 h-4 rounded bg-[#302E2B] border border-border/40" />
-                <span className="text-xs font-semibold text-white truncate max-w-[120px]">
-                  {playerBlack ? getPeerName(playerBlack) : "Vacant"}
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-4.5 h-4.5 rounded bg-[#272522] border border-[#403e3a] shadow-inner" />
+                <span className="text-xs font-bold text-white truncate max-w-[120px]">
+                  {playerBlack ? getPeerName(playerBlack) : "Vacant Seat"}
                 </span>
               </div>
               {playerBlack ? (
                 playerBlack === selfId && (
-                  <button className="text-[10px] text-danger hover:underline" onClick={() => leaveRole("black")}>
+                  <button className="text-[10px] text-danger hover:underline font-bold" onClick={() => leaveRole("black")}>
                     Leave
                   </button>
                 )
               ) : (
                 !myRole && (
-                  <button className="text-[10px] text-accent hover:underline font-bold" onClick={() => joinRole("black")}>
-                    Sit
+                  <button className="text-[10px] text-accent hover:underline font-extrabold uppercase tracking-wide" onClick={() => joinRole("black")}>
+                    Sit Black
                   </button>
                 )
               )}
@@ -248,14 +363,16 @@ export default function Chess({
         </div>
 
         {/* History / Log */}
-        <div className="border-t border-border/30 pt-3 flex-1 flex flex-col min-h-0">
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Move Log</h4>
-          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[140px] bg-black/20 p-2.5 rounded-xl border border-border/10 font-mono text-[10px] text-muted">
-            {history.length === 0 && <span className="opacity-40">No moves yet.</span>}
+        <div className="border-t border-border/20 pt-4 flex-1 flex flex-col min-h-0">
+          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2.5 flex items-center gap-1.5 select-none">
+            <Play size={12} className="text-accent" /> Move Log
+          </h4>
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[160px] bg-black/30 p-3 rounded-2xl border border-border/15 font-mono text-[11px] text-muted">
+            {history.length === 0 && <span className="opacity-40 select-none">No moves yet. Make a move!</span>}
             {history.map((h, idx) => (
-              <div key={idx} className="flex justify-between border-b border-border/5 pb-1">
+              <div key={idx} className="flex justify-between border-b border-white/5 pb-1 font-semibold">
                 <span>{Math.floor(idx / 2) + 1}. {idx % 2 === 0 ? "White" : "Black"}</span>
-                <span className="text-white font-bold">{h}</span>
+                <span className="text-white">{h}</span>
               </div>
             ))}
           </div>

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import type { ModuleProps } from "../../core/types";
 import type { GameState } from "./GamesModule";
 import { User, ShieldAlert, Dice5 } from "lucide-react";
@@ -15,8 +15,7 @@ const COLORS = {
   green: "#10B981"
 };
 
-// Simplified board path coordinates for rendering a circular track of 20 squares
-// 0 to 9 are Red's half, 10 to 19 are Green's half
+// Circular track coordinates (20 cells total)
 const PATH_COORDS = [
   { r: 4, c: 0 }, { r: 4, c: 1 }, { r: 4, c: 2 }, { r: 4, c: 3 }, { r: 3, c: 3 },
   { r: 2, c: 3 }, { r: 1, c: 3 }, { r: 0, c: 3 }, { r: 0, c: 4 }, { r: 0, c: 5 },
@@ -36,6 +35,9 @@ export default function Ludo({
   const playerRed = gameState.players["red"];
   const playerGreen = gameState.players["green"];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  
+  const [isDiceRolling, setIsDiceRolling] = useState(false);
+  const [diceRollProgress, setDiceRollProgress] = useState(1);
 
   const peerList = Array.from(peers.values());
   const getPeerName = (id: string) => {
@@ -47,51 +49,76 @@ export default function Ludo({
   const isMyTurn = myColor === turn;
 
   const rollDice = () => {
-    if (!isMyTurn || hasRolled) return;
-    const value = Math.floor(Math.random() * 6) + 1;
+    if (!isMyTurn || hasRolled || isDiceRolling) return;
     
-    updateGameState({
-      ...gameState,
-      ludo: {
-        ...gameState.ludo,
-        diceValue: value,
-        hasRolled: true
+    setIsDiceRolling(true);
+    let counter = 0;
+    const interval = setInterval(() => {
+      setDiceRollProgress(Math.floor(Math.random() * 6) + 1);
+      counter++;
+      if (counter > 8) {
+        clearInterval(interval);
+        const finalValue = Math.floor(Math.random() * 6) + 1;
+        setDiceRollProgress(finalValue);
+        setIsDiceRolling(false);
+
+        updateGameState({
+          ...gameState,
+          ludo: {
+            ...gameState.ludo,
+            diceValue: finalValue,
+            hasRolled: true
+          }
+        });
       }
-    });
+    }, 80);
+  };
+
+  // Convert the positions state stepsMoved (-1 to 19) to actual board coordinate indices
+  const getAbsoluteBoardIndex = (tokenId: string, stepsMoved: number): number => {
+    if (stepsMoved === -1 || stepsMoved === 19) return -1; // in base or home
+    if (tokenId.startsWith("red")) {
+      return stepsMoved; // Red starts at index 0
+    } else {
+      return (10 + stepsMoved) % 20; // Green starts at index 10
+    }
   };
 
   const moveToken = (tokenId: string) => {
-    if (!isMyTurn || !hasRolled) return;
+    if (!isMyTurn || !hasRolled || isDiceRolling) return;
     if (!tokenId.startsWith(turn)) return;
 
-    const currentPos = positions[tokenId];
-    let nextPos = currentPos;
+    const currentSteps = positions[tokenId] ?? -1;
+    let nextSteps = currentSteps;
 
-    if (currentPos === -1) {
-      // Need a 6 to hatch onto starting square (0 for red, 10 for green)
+    if (currentSteps === -1) {
+      // Need a 6 to hatch from base
       if (diceValue === 6) {
-        nextPos = turn === "red" ? 0 : 10;
+        nextSteps = 0; // hatches onto starting tile (0 steps moved)
       }
     } else {
-      nextPos = currentPos + diceValue;
-      // Max position on track is 19
-      if (nextPos > 19) {
-        nextPos = 19; // Goal reached
+      nextSteps = currentSteps + diceValue;
+      if (nextSteps > 19) {
+        nextSteps = 19; // Reach goal
       }
     }
 
-    const nextPositions = { ...positions, [tokenId]: nextPos };
+    const nextPositions = { ...positions, [tokenId]: nextSteps };
     
-    // Check if we captured opponent's token (same landing square, not home/goal)
-    if (nextPos !== -1 && nextPos !== 19) {
-      Object.keys(nextPositions).forEach((key) => {
-        if (!key.startsWith(turn) && nextPositions[key] === nextPos) {
-          nextPositions[key] = -1; // Send back home!
+    // Check for capturing opponent tokens
+    const nextBoardIdx = getAbsoluteBoardIndex(tokenId, nextSteps);
+    if (nextBoardIdx !== -1) {
+      Object.keys(nextPositions).forEach((otherTok) => {
+        if (!otherTok.startsWith(turn)) {
+          const otherBoardIdx = getAbsoluteBoardIndex(otherTok, nextPositions[otherTok]);
+          if (otherBoardIdx === nextBoardIdx) {
+            nextPositions[otherTok] = -1; // Send captured token back home!
+          }
         }
       });
     }
 
-    // Toggle turn
+    // Toggle Turn
     const nextTurn = turn === "red" ? "green" : "red";
 
     updateGameState({
@@ -105,12 +132,19 @@ export default function Ludo({
     });
   };
 
-  // Helper to get coordinates for tokens inside their base
+  // Fixed coordinates for 4 tokens inside their respective bases
   const getBaseCoords = (tokenId: string, cellSize: number) => {
-    if (tokenId === "red_0") return { x: 1.5 * cellSize, y: 1.5 * cellSize };
-    if (tokenId === "red_1") return { x: 2.5 * cellSize, y: 1.5 * cellSize };
-    if (tokenId === "green_0") return { x: 7.5 * cellSize, y: 7.5 * cellSize };
-    return { x: 8.5 * cellSize, y: 7.5 * cellSize }; // green_1
+    const isRed = tokenId.startsWith("red");
+    const idx = parseInt(tokenId.split("-")[1]) || 0;
+
+    const baseX = isRed ? 0.5 * cellSize : 6.5 * cellSize;
+    const baseY = isRed ? 0.5 * cellSize : 6.5 * cellSize;
+
+    // Arrange 4 tokens in a 2x2 grid inside their 3x3 base area
+    const offsetX = (idx % 2 === 0 ? 0.8 : 2.2) * cellSize;
+    const offsetY = (idx < 2 ? 0.8 : 2.2) * cellSize;
+
+    return { x: baseX + offsetX, y: baseY + offsetY };
   };
 
   // Draw board on canvas
@@ -130,41 +164,41 @@ export default function Ludo({
     const h = rect.width;
     const cellSize = w / 10;
 
-    // 1. Draw clear dark background
+    // Clear background
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#201F1D";
+    ctx.fillStyle = "#12141c";
     ctx.fillRect(0, 0, w, h);
 
-    // 2. Draw red start base (top-left 3x3 cells)
-    ctx.fillStyle = "rgba(239, 68, 68, 0.08)";
-    ctx.strokeStyle = "rgba(239, 68, 68, 0.3)";
+    // 1. Draw Red Base (Top-Left)
+    ctx.fillStyle = "rgba(239, 68, 68, 0.06)";
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.25)";
     ctx.lineWidth = 2;
     ctx.fillRect(0.5 * cellSize, 0.5 * cellSize, 3 * cellSize, 3 * cellSize);
     ctx.strokeRect(0.5 * cellSize, 0.5 * cellSize, 3 * cellSize, 3 * cellSize);
 
     ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
-    ctx.font = `bold ${cellSize * 0.45}px sans-serif`;
+    ctx.font = `bold ${cellSize * 0.4}px sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("RED BASE", 2 * cellSize, 2.7 * cellSize);
 
-    // 3. Draw green start base (bottom-right 3x3 cells)
-    ctx.fillStyle = "rgba(16, 185, 129, 0.08)";
-    ctx.strokeStyle = "rgba(16, 185, 129, 0.3)";
+    // 2. Draw Green Base (Bottom-Right)
+    ctx.fillStyle = "rgba(16, 185, 129, 0.06)";
+    ctx.strokeStyle = "rgba(16, 185, 129, 0.25)";
     ctx.fillRect(6.5 * cellSize, 6.5 * cellSize, 3 * cellSize, 3 * cellSize);
     ctx.strokeRect(6.5 * cellSize, 6.5 * cellSize, 3 * cellSize, 3 * cellSize);
 
     ctx.fillStyle = "rgba(16, 185, 129, 0.8)";
     ctx.fillText("GREEN BASE", 8 * cellSize, 8.7 * cellSize);
 
-    // 4. Draw track squares
+    // 3. Draw Track Tiles
     PATH_COORDS.forEach((cell, idx) => {
       const cx = cell.c * cellSize;
       const cy = cell.r * cellSize;
 
       const isRedHalf = idx < 10;
-      ctx.fillStyle = isRedHalf ? "rgba(239, 68, 68, 0.18)" : "rgba(16, 185, 129, 0.18)";
-      ctx.strokeStyle = isRedHalf ? "rgba(239, 68, 68, 0.35)" : "rgba(16, 185, 129, 0.35)";
+      ctx.fillStyle = isRedHalf ? "rgba(239, 68, 68, 0.15)" : "rgba(16, 185, 129, 0.15)";
+      ctx.strokeStyle = isRedHalf ? "rgba(239, 68, 68, 0.3)" : "rgba(16, 185, 129, 0.3)";
       ctx.lineWidth = 1.5;
 
       ctx.fillRect(cx, cy, cellSize, cellSize);
@@ -176,60 +210,70 @@ export default function Ludo({
       ctx.fillText(idx.toString(), cx + cellSize / 2, cy + cellSize / 2);
     });
 
-    // 5. Draw tokens
+    // 4. Draw Tokens
     Object.keys(positions).forEach((tok) => {
-      const pos = positions[tok];
-      const color = tok.startsWith("red") ? COLORS.red : COLORS.green;
+      const steps = positions[tok] ?? -1;
       const isRedToken = tok.startsWith("red");
+      const color = isRedToken ? COLORS.red : COLORS.green;
 
       let tx = 0;
       let ty = 0;
 
-      if (pos === -1) {
+      if (steps === -1) {
+        // Base coordinate
         const coords = getBaseCoords(tok, cellSize);
         tx = coords.x;
         ty = coords.y;
+      } else if (steps === 19) {
+        // Goal coordinate (Red goal at top-left, Green goal at bottom-right)
+        tx = isRedToken ? 2 * cellSize : 8 * cellSize;
+        ty = isRedToken ? 2 * cellSize : 8 * cellSize;
       } else {
-        const cell = PATH_COORDS[pos];
-        const tokensOnSquare = Object.keys(positions).filter(k => positions[k] === pos);
-        const idx = tokensOnSquare.indexOf(tok);
+        const boardIdx = getAbsoluteBoardIndex(tok, steps);
+        const cell = PATH_COORDS[boardIdx];
+        
+        // Handle multiple tokens on the same tile with a spread offset
+        const tokensOnSquare = Object.keys(positions).filter(k => getAbsoluteBoardIndex(k, positions[k]) === boardIdx);
+        const idxOnSquare = tokensOnSquare.indexOf(tok);
 
         tx = cell.c * cellSize + cellSize / 2;
         ty = cell.r * cellSize + cellSize / 2;
 
         if (tokensOnSquare.length > 1) {
-          // Offset tokens slightly on same cell
-          tx += (idx - (tokensOnSquare.length - 1) / 2) * (cellSize * 0.45);
+          tx += (idxOnSquare - (tokensOnSquare.length - 1) / 2) * (cellSize * 0.4);
         }
       }
 
-      // Draw Token Circle
+      ctx.save();
+      // Draw shadow
+      ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetY = 2;
+
+      // Outer token circle
       ctx.beginPath();
       ctx.arc(tx, ty, cellSize * 0.28, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-      ctx.shadowBlur = 4;
       ctx.fill();
-      ctx.shadowBlur = 0;
 
-      // Draw Highlight border if playable
+      // Border highlight if playable
+      ctx.shadowColor = "transparent"; // disable shadow for stroke
       const isPlayable = isMyTurn && hasRolled && isRedToken === (turn === "red");
-      ctx.beginPath();
-      ctx.arc(tx, ty, cellSize * 0.28, 0, Math.PI * 2);
       ctx.strokeStyle = isPlayable ? "#ffffff" : "rgba(0, 0, 0, 0.6)";
       ctx.lineWidth = isPlayable ? 3.5 : 1.5;
       ctx.stroke();
 
-      // Inner dot
+      // Inner center dot
       ctx.beginPath();
-      ctx.arc(tx, ty, cellSize * 0.1, 0, Math.PI * 2);
+      ctx.arc(tx, ty, cellSize * 0.09, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
       ctx.fill();
+
+      ctx.restore();
     });
 
   }, [positions, turn, hasRolled, isMyTurn]);
 
-  // Click handler on canvas
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -238,36 +282,40 @@ export default function Ludo({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const cellSize = rect.width / 10;
-    const tokenRadius = cellSize * 0.35;
+    const clickThreshold = cellSize * 0.45;
 
-    // Check click distance on all tokens
     let clickedTokenId: string | null = null;
     const tokenIds = Object.keys(positions);
 
     for (const tok of tokenIds) {
-      const pos = positions[tok];
+      const steps = positions[tok] ?? -1;
       let tx = 0;
       let ty = 0;
 
-      if (pos === -1) {
+      if (steps === -1) {
         const coords = getBaseCoords(tok, cellSize);
         tx = coords.x;
         ty = coords.y;
+      } else if (steps === 19) {
+        const isRedToken = tok.startsWith("red");
+        tx = isRedToken ? 2 * cellSize : 8 * cellSize;
+        ty = isRedToken ? 2 * cellSize : 8 * cellSize;
       } else {
-        const cell = PATH_COORDS[pos];
-        const tokensOnSquare = Object.keys(positions).filter(k => positions[k] === pos);
-        const idx = tokensOnSquare.indexOf(tok);
+        const boardIdx = getAbsoluteBoardIndex(tok, steps);
+        const cell = PATH_COORDS[boardIdx];
+        const tokensOnSquare = Object.keys(positions).filter(k => getAbsoluteBoardIndex(k, positions[k]) === boardIdx);
+        const idxOnSquare = tokensOnSquare.indexOf(tok);
 
         tx = cell.c * cellSize + cellSize / 2;
         ty = cell.r * cellSize + cellSize / 2;
 
         if (tokensOnSquare.length > 1) {
-          tx += (idx - (tokensOnSquare.length - 1) / 2) * (cellSize * 0.45);
+          tx += (idxOnSquare - (tokensOnSquare.length - 1) / 2) * (cellSize * 0.4);
         }
       }
 
       const dist = Math.hypot(x - tx, y - ty);
-      if (dist <= tokenRadius) {
+      if (dist <= clickThreshold) {
         clickedTokenId = tok;
         break;
       }
@@ -279,101 +327,108 @@ export default function Ludo({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center">
-      {/* Board & Controls */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-[360px]">
-        {/* Status */}
-        <div className="text-center bg-surface/30 border border-border/40 rounded-xl p-3 w-full backdrop-blur-sm">
+    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center animate-fade-in">
+      {/* Board & Dice Panel Column */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-[380px] w-full">
+        {/* Status indicator bar */}
+        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-4 w-full backdrop-blur-md shadow-md">
           {myColor ? (
             isMyTurn ? (
-              <span className="text-accent font-semibold animate-pulse">
-                Your Turn (Roll or Move {turn === "red" ? "Red" : "Green"})
+              <span className="text-accent font-extrabold flex items-center justify-center gap-2 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
+                Your turn! ({hasRolled ? "Move a token" : "Roll the dice"})
               </span>
             ) : (
-              <span>Waiting for {turn === "red" ? "Red" : "Green"}...</span>
+              <span className="font-semibold text-muted">Waiting for opponent... ({turn === "red" ? "Red" : "Green"}'s Turn)</span>
             )
           ) : (
-            <span className="text-muted flex items-center justify-center gap-1.5">
-              <ShieldAlert size={14} /> Spectator Mode
+            <span className="text-muted flex items-center justify-center gap-1.5 uppercase text-xs tracking-wider font-bold">
+              <ShieldAlert size={14} className="text-muted" /> Spectator Mode
             </span>
           )}
         </div>
 
         {/* Dice Controls Card */}
-        <div className="flex items-center gap-4 bg-surface/40 border border-border rounded-xl p-3 w-full justify-between">
+        <div className="flex items-center gap-4 bg-[#11131c]/40 border border-border/40 rounded-2xl p-4 w-full justify-between shadow-md">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-accent/20 border-2 border-accent rounded-xl flex items-center justify-center text-accent text-2xl font-black">
-              {diceValue}
+            <div 
+              className={`w-14 h-14 bg-accent/15 border-2 border-accent/40 rounded-2xl flex items-center justify-center text-accent text-3xl font-black shadow-inner transition-all duration-300 ${
+                isDiceRolling ? "scale-90 rotate-45 border-accent" : ""
+              }`}
+            >
+              {isDiceRolling ? diceRollProgress : diceValue}
             </div>
-            <span className="text-xs text-muted">Dice Value</span>
+            <span className="text-xs font-bold text-muted uppercase tracking-wider">Dice Value</span>
           </div>
 
           <button
             onClick={rollDice}
-            disabled={!isMyTurn || hasRolled}
-            className="btn-primary py-2 px-4 text-xs gap-1.5"
+            disabled={!isMyTurn || hasRolled || isDiceRolling}
+            className="btn-primary py-3 px-5 text-xs font-bold rounded-xl gap-2"
           >
-            <Dice5 size={14} /> Roll Dice
+            <Dice5 size={15} /> Roll Dice
           </button>
         </div>
 
         {/* Board Canvas */}
-        <div className="w-full aspect-square border border-border/40 rounded-2xl overflow-hidden bg-[#201F1D]">
+        <div className="w-full aspect-square border border-border/40 rounded-3xl overflow-hidden shadow-2xl p-2.5 bg-[#12141c]/50">
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
-            className={`w-full h-full block ${isMyTurn && hasRolled ? "cursor-pointer" : "cursor-not-allowed"}`}
+            className={`w-full h-full block rounded-2xl ${
+              isMyTurn && hasRolled ? "cursor-pointer" : "cursor-not-allowed"
+            }`}
           />
         </div>
       </div>
 
-      {/* Control panel and seats */}
-      <div className="w-full lg:w-64 flex flex-col gap-4 bg-surface/20 border border-border/40 rounded-2xl p-4">
+      {/* Control panel & seats */}
+      <div className="w-full lg:w-72 flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md">
         {/* Seats */}
         <div>
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2.5">Seats</h4>
+          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3 select-none">Seats</h4>
           <div className="space-y-2.5">
             {/* Red Player */}
-            <div className="flex items-center justify-between p-2.5 rounded-xl border border-border/20 bg-surface/30">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-4 h-4 rounded-full bg-red-500" />
-                <span className="text-xs font-semibold text-white truncate max-w-[120px]">
-                  {playerRed ? getPeerName(playerRed) : "Vacant"}
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-4.5 h-4.5 rounded-full bg-red-500 shadow-inner" />
+                <span className="text-xs font-bold text-white truncate max-w-[120px]">
+                  {playerRed ? getPeerName(playerRed) : "Vacant Seat"}
                 </span>
               </div>
               {playerRed ? (
                 playerRed === selfId && (
-                  <button className="text-[10px] text-danger hover:underline" onClick={() => leaveRole("red")}>
+                  <button className="text-[10px] text-danger hover:underline font-bold" onClick={() => leaveRole("red")}>
                     Leave
                   </button>
                 )
               ) : (
                 !myColor && (
-                  <button className="text-[10px] text-accent hover:underline font-bold" onClick={() => joinRole("red")}>
-                    Sit
+                  <button className="text-[10px] text-accent hover:underline font-extrabold uppercase tracking-wide" onClick={() => joinRole("red")}>
+                    Sit Red
                   </button>
                 )
               )}
             </div>
 
             {/* Green Player */}
-            <div className="flex items-center justify-between p-2.5 rounded-xl border border-border/20 bg-surface/30">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-4 h-4 rounded-full bg-emerald-500" />
-                <span className="text-xs font-semibold text-white truncate max-w-[120px]">
-                  {playerGreen ? getPeerName(playerGreen) : "Vacant"}
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-4.5 h-4.5 rounded-full bg-emerald-500 shadow-inner" />
+                <span className="text-xs font-bold text-white truncate max-w-[120px]">
+                  {playerGreen ? getPeerName(playerGreen) : "Vacant Seat"}
                 </span>
               </div>
               {playerGreen ? (
                 playerGreen === selfId && (
-                  <button className="text-[10px] text-danger hover:underline" onClick={() => leaveRole("green")}>
+                  <button className="text-[10px] text-danger hover:underline font-bold" onClick={() => leaveRole("green")}>
                     Leave
                   </button>
                 )
               ) : (
                 !myColor && (
-                  <button className="text-[10px] text-accent hover:underline font-bold" onClick={() => joinRole("green")}>
-                    Sit
+                  <button className="text-[10px] text-accent hover:underline font-extrabold uppercase tracking-wide" onClick={() => joinRole("green")}>
+                    Sit Green
                   </button>
                 )
               )}
@@ -382,8 +437,8 @@ export default function Ludo({
         </div>
 
         {/* Ludo Game Manual / Rules */}
-        <div className="border-t border-border/30 pt-3 text-[10px] text-muted flex flex-col gap-1.5 leading-relaxed">
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-1">How to Play</h4>
+        <div className="border-t border-border/20 pt-4 text-[10px] text-muted flex flex-col gap-2.5 leading-relaxed">
+          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-1 select-none">How to Play</h4>
           <p>• Roll a <b>6</b> to deploy a token from home base to the track.</p>
           <p>• Move tokens forward along the track squares.</p>
           <p>• Land on an opponent's token to capture it and send it back home.</p>

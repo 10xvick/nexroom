@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useWebRTC } from "../core/WebRTCContext";
-import { 
-  Copy, Plus, LogIn, Loader2, CheckCircle2, ArrowLeft, 
-  Link, Code2, Users, Network, ShieldCheck, Cpu 
-} from "lucide-react";
+import { Copy, Plus, LogIn, Loader2, CheckCircle2, ArrowLeft, Link, Code2, Shield } from "lucide-react";
 
 function CopyBtn({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -13,12 +10,9 @@ function CopyBtn({ text, label }: { text: string; label: string }) {
     setTimeout(() => setCopied(false), 2500); 
   }
   return (
-    <button 
-      onClick={copy} 
-      className="btn-ghost py-1.5 px-3 rounded-lg text-xs gap-1.5 hover:bg-accent/10 hover:text-accent hover:border-accent/30 transition-all duration-300"
-    >
+    <button onClick={copy} className="btn-ghost gap-1.5 text-xs py-1.5 px-3 rounded-lg border border-border/40 hover:bg-surface/60 transition-all">
       {copied ? (
-        <><CheckCircle2 size={13} className="text-success" /> Copied!</>
+        <><CheckCircle2 size={13} className="text-success animate-scale-in" /> Copied!</>
       ) : (
         <><Copy size={13} /> {label}</>
       )}
@@ -28,14 +22,14 @@ function CopyBtn({ text, label }: { text: string; label: string }) {
 
 function CodeBox({ code, label }: { code: string; label: string }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 animate-slide-up">
       <p className="text-xs text-muted font-bold uppercase tracking-wider">{label}</p>
-      <div className="relative group">
+      <div className="relative">
         <textarea 
           readOnly 
           value={code} 
           rows={3}
-          className="w-full font-mono text-xs bg-black/40 border border-border group-hover:border-border-light rounded-xl px-4 py-3 text-accent-glow resize-none focus:outline-none transition-colors" 
+          className="w-full font-mono text-xs bg-black/40 border border-border/40 rounded-xl px-4 py-3 text-accent resize-none focus:outline-none focus:border-accent/40" 
         />
         <div className="absolute top-2 right-2">
           <CopyBtn text={code} label="Copy" />
@@ -70,6 +64,7 @@ export default function Lobby() {
     setName(n); 
   }
 
+  // ── Detect invite URL on mount ───────────────────────────────────────────────
   useEffect(() => {
     const match = window.location.hash.match(/[#&]i=([^&]+)/);
     if (match) {
@@ -91,6 +86,7 @@ export default function Lobby() {
     }
   }, []);
 
+  // ── Auto-join when name is set in URL-invite view ───────────────────────────
   useEffect(() => {
     if (view === "join_url" && pendingOfferCode && name.trim() && !autoStarted.current && phase === "idle") {
       autoStarted.current = true;
@@ -116,46 +112,37 @@ export default function Lobby() {
   const url = myCode ? inviteUrl(myCode, signalingMethod) : "";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-bg relative overflow-hidden select-none">
-      {/* ── Background Grid & Glowing Orbs ── */}
-      <div className="absolute inset-0 pointer-events-none z-0">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f293708_1px,transparent_1px),linear-gradient(to_bottom,#1f293708_1px,transparent_1px)] bg-[size:24px_24px]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_20%,#06070a)]" />
-        
-        {/* Glowing Orbs */}
-        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] rounded-full bg-accent/8 blur-[120px] glow-bg" />
-        <div className="absolute -bottom-[10%] -right-[10%] w-[50%] h-[50%] rounded-full bg-purple-500/6 blur-[120px] glow-bg" style={{ animationDelay: "-5s" }} />
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#090a0f] relative overflow-hidden">
+      {/* Background Glow Blobs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-accent/10 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] bg-purple-500/5 rounded-full blur-[120px]" />
       </div>
 
-      <div className="relative w-full max-w-lg z-10">
-        {/* Header App Brand */}
-        <div className="text-center mb-10 float-effect">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-accent to-purple-600 p-[1px] shadow-[0_8px_30px_rgba(99,102,241,0.2)] mb-4">
-            <div className="w-full h-full bg-[#0d0e12] rounded-[15px] flex items-center justify-center">
-              <Network size={28} className="text-accent-glow" />
-            </div>
+      <div className="relative w-full max-w-md animate-scale-in">
+        {/* Logo/Header */}
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent/10 border border-accent/30 text-accent mb-4 shadow-[0_0_32px_rgba(79,142,247,0.15)] animate-pulse">
+            <span className="text-3xl font-extrabold select-none">⬡</span>
           </div>
-          <h1 className="text-4xl font-extrabold text-white tracking-tight font-display bg-gradient-to-r from-white via-white to-muted bg-clip-text text-transparent">
-            nexroom
-          </h1>
-          <p className="text-muted text-sm font-medium mt-2 tracking-wide">
+          <h1 className="text-4xl font-extrabold text-white tracking-tight">nexroom</h1>
+          <p className="text-muted text-xs font-semibold uppercase tracking-widest mt-2">
             Serverless Peer-to-Peer Workspace
           </p>
         </div>
 
         {/* ── Gathering spinner ── */}
         {phase === "gathering" && (
-          <div className="glass rounded-3xl p-10 flex flex-col items-center gap-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-full border-2 border-accent/20 animate-pulse" />
+          <div className="glass rounded-3xl p-8 flex flex-col items-center gap-4 text-center border-accent/25 shadow-lg shadow-accent/5">
+            <div className="p-3 bg-accent/10 rounded-2xl">
               <Loader2 size={32} className="text-accent animate-spin" />
             </div>
-            <div className="space-y-1.5">
-              <p className="text-base text-white font-bold tracking-tight">Configuring Connection Path...</p>
-              <p className="text-xs text-muted max-w-sm leading-relaxed">
+            <div>
+              <p className="text-base font-bold text-white">Configuring Connection...</p>
+              <p className="text-xs text-muted/80 mt-1">
                 {signalingMethod === "manual"
-                  ? "Resolving ICE candidates with STUN/TURN servers to bypass NAT. This will generate your connection payload."
-                  : "Connecting to secure distributed signaling relay..."}
+                  ? "STUN discovering network path. Takes a few seconds."
+                  : "Establishing secure signaling link..."}
               </p>
             </div>
           </div>
@@ -163,99 +150,96 @@ export default function Lobby() {
 
         {/* ── offer_ready: host shares manual invite link ── */}
         {phase === "offer_ready" && signalingMethod === "manual" && (
-          <div className="glass rounded-3xl p-8 space-y-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
-            <div className="flex items-center gap-3 border-b border-border pb-4">
-              <ShieldCheck size={20} className="text-accent-glow" />
-              <p className="text-sm font-bold text-white uppercase tracking-wider">Step 1 — Share Invite</p>
+          <div className="glass rounded-3xl p-6 space-y-5 shadow-2xl border-border/40 animate-slide-up">
+            <div className="space-y-1">
+              <p className="text-sm font-bold text-white">Step 1 — Share Invite Link</p>
+              <p className="text-xs text-muted">Share the link via any channel. When they open it, their answer code will be generated automatically.</p>
             </div>
-            
-            <p className="text-xs text-muted leading-relaxed">
-              Copy the secure invite link and send it to your peer. They will paste their answer back to establish the channel.
-            </p>
 
-            <div className="flex items-center gap-3 bg-black/40 rounded-xl px-4 py-3 border border-border/80 hover:border-border-light transition-colors">
+            <div className="flex items-center gap-2 bg-black/40 rounded-xl px-4 py-3 border border-accent/20">
               <Link size={14} className="text-accent shrink-0" />
-              <span className="text-xs text-accent-glow font-mono truncate flex-1">{url}</span>
+              <span className="text-xs text-accent/90 truncate flex-1 font-mono">{url}</span>
               <CopyBtn text={url} label="Copy" />
             </div>
 
             <button
               onClick={() => setShowRawCode(!showRawCode)}
-              className="flex items-center gap-2 text-xs text-muted hover:text-white transition-colors"
+              className="flex items-center gap-1.5 text-xs text-muted hover:text-white transition-colors"
             >
-              <Code2 size={13} /> {showRawCode ? "Hide raw code payload" : "Alternative: Use raw payload code"}
+              <Code2 size={13} /> {showRawCode ? "Hide raw code" : "Trouble with link? Use raw code"}
             </button>
-            
-            {showRawCode && <CodeBox code={myCode} label="Host Offer Payload" />}
+            {showRawCode && <CodeBox code={myCode} label="Raw invite code" />}
 
-            <div className="flex items-center gap-3 border-b border-b-border pt-4 pb-4">
-              <Code2 size={20} className="text-purple-400" />
-              <p className="text-sm font-bold text-white uppercase tracking-wider">Step 2 — Receive Answer</p>
+            <hr className="border-border/30" />
+            
+            <div className="space-y-1.5">
+              <p className="text-sm font-bold text-white">Step 2 — Paste Answer Code</p>
+              <p className="text-xs text-muted">After they open your link, they'll see an answer code. Paste it here to connect.</p>
             </div>
             
-            <textarea 
-              rows={3} 
-              className="w-full font-mono text-xs resize-none"
-              placeholder="Paste the receiver's answer payload here…"
-              value={answerInput} 
-              onChange={(e) => setAnswerInput(e.target.value)} 
-            />
-            {gatherError && <p className="text-xs text-danger font-medium">{gatherError}</p>}
-            
-            <button 
-              className="btn-primary w-full justify-center py-3" 
-              onClick={handleComplete} 
-              disabled={!answerInput.trim()}
-            >
-              <CheckCircle2 size={16} /> Establish P2P Connection
-            </button>
+            <div className="space-y-3">
+              <textarea 
+                rows={3} 
+                className="w-full font-mono text-xs resize-none"
+                placeholder="Paste answer code here…"
+                value={answerInput} 
+                onChange={(e) => setAnswerInput(e.target.value)} 
+              />
+              {gatherError && <p className="text-xs text-danger font-medium">{gatherError}</p>}
+              <button 
+                className="btn-primary w-full justify-center py-3 rounded-xl" 
+                onClick={handleComplete} 
+                disabled={!answerInput.trim()}
+              >
+                <CheckCircle2 size={16} /> Establish Connection
+              </button>
+            </div>
           </div>
         )}
 
         {/* ── answer_ready: guest shows answer code or waits for handshake ── */}
         {phase === "answer_ready" && (
-          <div className="glass rounded-3xl p-8 space-y-5 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
+          <div className="glass rounded-3xl p-6 space-y-4 shadow-2xl border-border/40 animate-slide-up">
             {signalingMethod === "manual" ? (
-              <>
-                <div className="flex items-center gap-3 border-b border-border pb-4">
-                  <ShieldCheck size={20} className="text-accent-glow" />
-                  <p className="text-sm font-bold text-white uppercase tracking-wider">Answer Payload Generated</p>
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-white">Send this answer code back</p>
+                  <p className="text-xs text-muted">Copy this and send it back to the person who shared the invite link.</p>
                 </div>
-                <p className="text-xs text-muted leading-relaxed">
-                  Send this response payload back to the host. Once they paste it, the direct tunnel will establish.
-                </p>
-                <CodeBox code={myCode} label="Receiver Answer Payload" />
-              </>
+                <CodeBox code={myCode} label="Your answer code" />
+              </div>
             ) : (
               <div className="flex flex-col items-center gap-4 text-center py-6">
-                <Loader2 size={32} className="text-accent animate-spin" />
-                <p className="text-base text-white font-bold">Connecting automatically...</p>
-                <p className="text-xs text-muted max-w-xs leading-relaxed">
-                  Negotiating direct peer connection via {signalingMethod}.
-                </p>
+                <div className="p-3 bg-accent/10 rounded-2xl">
+                  <Loader2 size={32} className="text-accent animate-spin" />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-white">Connecting Automatically...</p>
+                  <p className="text-xs text-muted/80 mt-1">Performing secure handshake with Host using {signalingMethod}.</p>
+                </div>
               </div>
             )}
-            <div className="flex items-center gap-2.5 text-xs text-muted bg-surface-light/50 rounded-xl px-4 py-3 justify-center border border-border">
+            <div className="flex items-center gap-2.5 text-xs text-muted bg-surface/30 rounded-xl px-4 py-3 justify-center border border-border/20">
               <Loader2 size={13} className="animate-spin shrink-0 text-accent" />
-              <span>Awaiting connection validation from host…</span>
+              <span>Waiting for host acceptance…</span>
             </div>
           </div>
         )}
 
         {/* ── join_url: guest opened invite link, needs name ── */}
         {phase === "idle" && view === "join_url" && (
-          <div className="glass rounded-3xl p-8 space-y-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-white font-display">You are Invited</h2>
-              <p className="text-xs text-muted">Join room: <span className="text-accent-glow font-bold">{pendingRoomName}</span></p>
+          <div className="glass rounded-3xl p-6 space-y-5 shadow-2xl border-border/40 animate-slide-up">
+            <div>
+              <p className="text-base font-bold text-white">You're Invited</p>
+              <p className="text-xs text-muted mt-0.5">To join room: <span className="text-accent font-semibold">{pendingRoomName}</span></p>
             </div>
             
             <div className="space-y-2">
-              <label className="text-xs text-muted font-bold uppercase tracking-wider block">Your Display Name</label>
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Your Display Name</label>
               <input 
                 type="text" 
                 className="w-full" 
-                placeholder="e.g. John Doe"
+                placeholder="Enter your display name"
                 value={name} 
                 onChange={(e) => saveName(e.target.value)} 
                 maxLength={32}
@@ -265,19 +249,19 @@ export default function Lobby() {
             
             {gatherError && <p className="text-xs text-danger font-medium">{gatherError}</p>}
             
-            <div className="space-y-3">
+            <div className="space-y-3 pt-2">
               <button 
-                className="btn-primary w-full justify-center py-3"
+                className="btn-primary w-full justify-center py-3 rounded-xl"
                 onClick={() => { autoStarted.current = true; startGuest(pendingOfferCode, name.trim()); }}
                 disabled={!name.trim()}
               >
-                <LogIn size={16} /> Enter Workspace
+                <LogIn size={16} /> Connect to Workspace
               </button>
               <button 
                 onClick={() => setView("home")} 
-                className="text-xs text-muted hover:text-white w-full text-center transition-colors py-1"
+                className="text-xs text-muted hover:text-white w-full text-center transition-colors font-medium"
               >
-                Cancel & go home
+                Cancel
               </button>
             </div>
           </div>
@@ -285,39 +269,35 @@ export default function Lobby() {
 
         {/* ── home ── */}
         {phase === "idle" && view === "home" && (
-          <div className="glass rounded-3xl p-8 space-y-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
+          <div className="glass rounded-3xl p-6 space-y-5 shadow-2xl border-border/40 animate-slide-up">
             <div className="space-y-2">
-              <label className="text-xs text-muted font-bold uppercase tracking-wider block">Display Name</label>
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Your Display Name</label>
               <input 
                 type="text" 
                 className="w-full" 
-                placeholder="Enter your display name…"
+                placeholder="Enter display name (e.g. Alice)"
                 value={name} 
                 onChange={(e) => saveName(e.target.value)} 
                 maxLength={32} 
               />
             </div>
             
-            <div className="relative flex py-1 items-center">
-              <div className="flex-grow border-t border-border"></div>
-              <span className="flex-shrink mx-4 text-[10px] text-muted font-bold uppercase tracking-wider">workspace setup</span>
-              <div className="flex-grow border-t border-border"></div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3">
+            <hr className="border-border/30" />
+            
+            <div className="space-y-3">
               <button 
-                className="btn-primary w-full justify-center py-3.5" 
+                className="btn-primary w-full justify-center py-3 rounded-xl" 
                 onClick={() => setView("create")} 
                 disabled={!name.trim()}
               >
-                <Plus size={18} /> Create New Workspace
+                <Plus size={16} /> Create New Workspace
               </button>
               <button 
-                className="btn-ghost w-full justify-center py-3.5 border-border hover:border-accent/30"
+                className="btn-ghost w-full justify-center py-3 rounded-xl"
                 onClick={() => setView("join_manual")} 
                 disabled={!name.trim()}
               >
-                <LogIn size={18} /> Join Existing Room
+                <Code2 size={16} /> Join Existing Workspace
               </button>
             </div>
           </div>
@@ -325,19 +305,16 @@ export default function Lobby() {
 
         {/* ── create ── */}
         {phase === "idle" && view === "create" && (
-          <div className="glass rounded-3xl p-8 space-y-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
-            <div className="flex items-center gap-3 border-b border-border pb-4">
-              <button 
-                onClick={() => setView("home")} 
-                className="text-muted hover:text-white transition-colors p-1"
-              >
+          <div className="glass rounded-3xl p-6 space-y-5 shadow-2xl border-border/40 animate-slide-up">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setView("home")} className="p-1.5 hover:bg-surface rounded-lg text-muted hover:text-white transition-colors">
                 <ArrowLeft size={16} />
               </button>
-              <p className="text-base font-bold text-white font-display">Create Workspace</p>
+              <p className="text-base font-bold text-white">Create a Workspace</p>
             </div>
             
             <div className="space-y-2">
-              <label className="text-xs text-muted font-bold uppercase tracking-wider block">Workspace Name</label>
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Room / Workspace Name</label>
               <input 
                 type="text" 
                 className="w-full" 
@@ -348,59 +325,56 @@ export default function Lobby() {
             </div>
             
             <p className="text-xs text-muted leading-relaxed">
-              Creates a secure direct connection channel. You will be given a 6-character room code to invite peers.
+              A secure workspace link and room code will be generated automatically to share with your peers.
             </p>
             
             {gatherError && <p className="text-xs text-danger font-medium">{gatherError}</p>}
             
-            <button className="btn-primary w-full justify-center py-3.5" onClick={handleCreate}>
-              <Plus size={18} /> Launch Workspace
+            <button className="btn-primary w-full justify-center py-3 rounded-xl" onClick={handleCreate}>
+              <Plus size={16} /> Initialize Workspace
             </button>
           </div>
         )}
 
-        {/* ── join manual ── */}
+        {/* ── join manual (supports 6-character room codes AND base64 manual strings) ── */}
         {phase === "idle" && view === "join_manual" && (
-          <div className="glass rounded-3xl p-8 space-y-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border-white/5">
-            <div className="flex items-center gap-3 border-b border-border pb-4">
-              <button 
-                onClick={() => setView("home")} 
-                className="text-muted hover:text-white transition-colors p-1"
-              >
+          <div className="glass rounded-3xl p-6 space-y-5 shadow-2xl border-border/40 animate-slide-up">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setView("home")} className="p-1.5 hover:bg-surface rounded-lg text-muted hover:text-white transition-colors">
                 <ArrowLeft size={16} />
               </button>
-              <p className="text-base font-bold text-white font-display">Connect to Room</p>
+              <p className="text-base font-bold text-white">Join a Workspace</p>
             </div>
             
-            <p className="text-xs text-muted leading-relaxed">
-              Enter the 6-character Room Code shared with you, or paste the manual host payload.
-            </p>
-            
-            <textarea 
-              rows={4} 
-              className="w-full font-mono text-xs resize-none"
-              placeholder="Room Code (e.g. A3B89C) or manual invite payload…"
-              value={manualOfferInput} 
-              onChange={(e) => setManualOfferInput(e.target.value)} 
-            />
+            <div className="space-y-3">
+              <p className="text-xs text-muted leading-relaxed">
+                Paste a 6-character Room Code (e.g. A3B89C) or a manual offline invitation string to connect.
+              </p>
+              <textarea 
+                rows={4} 
+                className="w-full font-mono text-xs resize-none"
+                placeholder="Enter Room Code or manual invite string…"
+                value={manualOfferInput} 
+                onChange={(e) => setManualOfferInput(e.target.value)} 
+              />
+            </div>
             
             {gatherError && <p className="text-xs text-danger font-medium">{gatherError}</p>}
             
             <button 
-              className="btn-primary w-full justify-center py-3.5" 
+              className="btn-primary w-full justify-center py-3 rounded-xl" 
               onClick={handleJoin} 
               disabled={!manualOfferInput.trim()}
             >
-              <LogIn size={18} /> Connect Workspace
+              <LogIn size={16} /> Establish Connection
             </button>
           </div>
         )}
 
-        {/* Info footer */}
-        <div className="mt-8 flex items-center justify-center gap-6 text-[10px] text-muted/50 font-bold uppercase tracking-wider">
-          <span className="flex items-center gap-1.5"><Cpu size={12} /> Serverless</span>
-          <span className="flex items-center gap-1.5"><Users size={12} /> Peer-to-Peer</span>
-          <span className="flex items-center gap-1.5"><ShieldCheck size={12} /> Encrypted</span>
+        {/* Footer */}
+        <div className="flex items-center justify-center gap-1.5 text-[11px] text-muted/50 mt-8 font-semibold select-none">
+          <Shield size={11} />
+          <span>100% Serverless · Direct P2P via WebRTC</span>
         </div>
       </div>
     </div>
