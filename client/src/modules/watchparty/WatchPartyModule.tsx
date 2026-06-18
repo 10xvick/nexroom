@@ -528,45 +528,77 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
             </div>
           </div>
         ) : (
-          <div className="flex-grow flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border text-muted py-12">
-            <Play size={40} className="opacity-30" />
-            <p className="text-sm">Paste a YouTube URL above to start a watch party</p>
-            <p className="text-xs opacity-60">Play/pause/seek syncs to all peers in the room</p>
+          <div className="flex-grow flex flex-col items-center justify-center gap-6 rounded-xl border border-dashed border-border text-muted py-12 px-6">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <Play size={40} className="opacity-35 text-accent animate-pulse" />
+              <p className="text-sm font-semibold text-white">Paste a YouTube URL above to start a watch party</p>
+              <p className="text-xs opacity-60">Play/pause/seek syncs to all peers in the room</p>
+            </div>
+            
+            <div className="w-full max-w-md border-t border-border/40 pt-6 flex flex-col gap-3">
+              <p className="text-xs font-bold text-muted uppercase tracking-wider text-center mb-1">
+                Or pick a quick recommendation:
+              </p>
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  { title: "🎵 Lofi Hip Hop Radio (Lofi Girl)", url: "https://www.youtube.com/watch?v=jfKfPfyJRdk" },
+                  { title: "🐰 Big Buck Bunny (Open Movie)", url: "https://www.youtube.com/watch?v=aqz-KE-BPKQ" },
+                  { title: "🚀 NASA ISS Space Station Live Stream", url: "https://www.youtube.com/watch?v=x7WZzEaFk6s" },
+                  { title: "🌊 Relaxing Ocean Waves (4K)", url: "https://www.youtube.com/watch?v=S15C421p9gM" }
+                ].map((rec) => (
+                  <button
+                    key={rec.url}
+                    onClick={() => {
+                      setInputUrl(rec.url);
+                      const id = extractVideoId(rec.url);
+                      if (id) {
+                        setVideoId(id);
+                        setVideoUrl(rec.url);
+                        playerReadyRef.current = false;
+                        setDuration(0);
+                        setCurrentTime(0);
+                        sendModuleEvent("load", { type: "load", url: rec.url } as WPEvent);
+                        savePartyState({ videoUrl: rec.url, videoId: id, isPlaying: false, time: 0 });
+                      }
+                    }}
+                    className="w-full text-left text-xs bg-surface/30 hover:bg-surface border border-border/40 hover:border-accent/50 rounded-xl px-4 py-2.5 transition-all text-white font-medium hover:scale-[1.01]"
+                  >
+                    {rec.title}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
 
       {/* Resize Handle Divider */}
-      {videoId && (
-        <div 
-          onMouseDown={startResize}
-          className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
-            isResizing ? "bg-accent active" : ""
-          }`}
-        />
-      )}
+      <div 
+        onMouseDown={startResize}
+        className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
+          isResizing ? "bg-accent active" : ""
+        }`}
+      />
 
       {/* Right side: Reused Chat Panel */}
-      {videoId && (
-        <div 
-          style={{ width: `${sidebarWidth}px` }} 
-          className="flex flex-col bg-surface/20 border border-border rounded-xl overflow-hidden h-full shrink-0"
-        >
-          <div className="px-4 py-3 border-b border-border bg-surface/40">
-            <h3 className="text-sm font-semibold text-white">Watch Party Chat</h3>
-          </div>
-          <div className="flex-1 min-h-0">
-            <ChatModule
-              room={room!}
-              selfId={selfId}
-              selfName={selfName}
-              peers={peers}
-              sendModuleEvent={sendForChat}
-              onModuleEvent={onForChat}
-            />
-          </div>
+      <div 
+        style={{ width: `${sidebarWidth}px` }} 
+        className="flex flex-col bg-surface/20 border border-border rounded-xl overflow-hidden h-full shrink-0"
+      >
+        <div className="px-4 py-3 border-b border-border bg-surface/40">
+          <h3 className="text-sm font-semibold text-white">Watch Party Chat</h3>
         </div>
-      )}
+        <div className="flex-1 min-h-0">
+          <ChatModule
+            room={room!}
+            selfId={selfId}
+            selfName={selfName}
+            peers={peers}
+            sendModuleEvent={sendForChat}
+            onModuleEvent={onForChat}
+          />
+        </div>
+      </div>
     </div>
   );
 }
