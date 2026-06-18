@@ -11,60 +11,92 @@
 }
 
 body {
-  background-color: #0d0f14;
-  color: #e2e8f0;
+  background-color: #06070a;
+  color: #f8fafc;
   font-family: "Inter", system-ui, sans-serif;
   margin: 0;
   min-height: 100vh;
+  overflow: hidden;
 }
 
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #161a22;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #252c38;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 99px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
+  background: rgba(255, 255, 255, 0.2);
 }
 
+/* Glassmorphism */
 .glass {
-  background: rgba(22, 26, 34, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid #252c38;
+  background: rgba(15, 17, 21, 0.75);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.glass-accent {
+  background: rgba(99, 102, 241, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+/* Premium Buttons */
 .btn {
-  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-150 cursor-pointer select-none;
+  @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer select-none active:scale-[0.98];
 }
 .btn-primary {
-  @apply btn bg-accent hover:bg-accent-dim text-white;
+  @apply btn bg-accent text-white shadow-[0_4px_20px_rgba(99,102,241,0.3)] hover:shadow-[0_4px_30px_rgba(99,102,241,0.55)] hover:bg-accent-dim border border-accent/25;
 }
 .btn-ghost {
-  @apply btn bg-transparent hover:bg-surface text-muted hover:text-white border border-border;
+  @apply btn bg-surface-light/30 border border-border/80 text-muted hover:text-white hover:bg-surface-light hover:border-border-light;
 }
 .btn-danger {
-  @apply btn bg-danger/20 hover:bg-danger/30 text-danger border border-danger/30;
+  @apply btn bg-danger/10 hover:bg-danger/20 text-danger border border-danger/25;
 }
 
+/* Inputs & Form Controls */
 input[type="text"],
 input[type="url"],
 textarea,
 select {
-  @apply bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white outline-none transition-colors;
+  @apply bg-surface/50 border border-border rounded-xl px-4 py-2.5 text-sm text-white outline-none transition-all duration-300 placeholder-muted/50 hover:border-border-light focus:border-accent/60 focus:bg-surface/80 focus:shadow-[0_0_15px_rgba(99,102,241,0.1)];
 }
-input[type="text"]:focus,
-input[type="url"]:focus,
-textarea:focus,
-select:focus {
-  @apply border-accent;
+
+/* Glowing Animations & Custom FX */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.25; transform: scale(1.05); }
+}
+
+.glow-bg {
+  animation: pulseGlow 10s infinite ease-in-out;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+.float-effect {
+  animation: float 6s ease-in-out infinite;
 }
 
 .tag {
-  @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold tracking-wide border;
+}
+
+/* Native App Sidebar Active Indication */
+.sidebar-indicator::after {
+  content: '';
+  @apply absolute left-0 w-1 h-5 bg-accent rounded-r-md transition-all duration-300;
 }
