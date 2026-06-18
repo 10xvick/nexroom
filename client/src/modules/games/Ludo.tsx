@@ -39,6 +39,34 @@ export default function Ludo({
   const [isDiceRolling, setIsDiceRolling] = useState(false);
   const [diceRollProgress, setDiceRollProgress] = useState(1);
 
+  // Resize Panel States
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX - 16;
+      if (newWidth > 200 && newWidth < 500) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
   const peerList = Array.from(peers.values());
   const getPeerName = (id: string) => {
     if (id === selfId) return "You";
@@ -327,51 +355,57 @@ export default function Ludo({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center animate-fade-in">
+    <div className={`flex h-full p-4 overflow-hidden gap-1 ${isResizing ? "select-none" : ""}`}>
       {/* Board & Dice Panel Column */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-[380px] w-full">
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 min-h-0 overflow-y-auto pr-3">
         {/* Status indicator bar */}
-        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-4 w-full backdrop-blur-md shadow-md">
+        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-3 w-full max-w-sm backdrop-blur-md shadow-md">
           {myColor ? (
             isMyTurn ? (
-              <span className="text-accent font-extrabold flex items-center justify-center gap-2 animate-pulse">
+              <span className="text-accent font-extrabold flex items-center justify-center gap-2 animate-pulse text-xs">
                 <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
                 Your turn! ({hasRolled ? "Move a token" : "Roll the dice"})
               </span>
             ) : (
-              <span className="font-semibold text-muted">Waiting for opponent... ({turn === "red" ? "Red" : "Green"}'s Turn)</span>
+              <span className="font-semibold text-muted text-xs">Waiting for opponent... ({turn === "red" ? "Red" : "Green"}'s Turn)</span>
             )
           ) : (
             <span className="text-muted flex items-center justify-center gap-1.5 uppercase text-xs tracking-wider font-bold">
-              <ShieldAlert size={14} className="text-muted" /> Spectator Mode
+              <ShieldAlert size={12} className="text-muted" /> Spectator Mode
             </span>
           )}
         </div>
 
         {/* Dice Controls Card */}
-        <div className="flex items-center gap-4 bg-[#11131c]/40 border border-border/40 rounded-2xl p-4 w-full justify-between shadow-md">
+        <div className="flex items-center gap-4 bg-[#11131c]/40 border border-border/40 rounded-2xl p-3.5 w-full max-w-sm justify-between shadow-md">
           <div className="flex items-center gap-3">
             <div 
-              className={`w-14 h-14 bg-accent/15 border-2 border-accent/40 rounded-2xl flex items-center justify-center text-accent text-3xl font-black shadow-inner transition-all duration-300 ${
+              className={`w-12 h-12 bg-accent/15 border-2 border-accent/40 rounded-2xl flex items-center justify-center text-accent text-2xl font-black shadow-inner transition-all duration-300 ${
                 isDiceRolling ? "scale-90 rotate-45 border-accent" : ""
               }`}
             >
               {isDiceRolling ? diceRollProgress : diceValue}
             </div>
-            <span className="text-xs font-bold text-muted uppercase tracking-wider">Dice Value</span>
+            <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Dice Value</span>
           </div>
 
           <button
             onClick={rollDice}
             disabled={!isMyTurn || hasRolled || isDiceRolling}
-            className="btn-primary py-3 px-5 text-xs font-bold rounded-xl gap-2"
+            className="btn-primary py-2 px-4 text-xs font-bold rounded-xl gap-2"
           >
-            <Dice5 size={15} /> Roll Dice
+            <Dice5 size={14} /> Roll Dice
           </button>
         </div>
 
         {/* Board Canvas */}
-        <div className="w-full aspect-square border border-border/40 rounded-3xl overflow-hidden shadow-2xl p-2.5 bg-[#12141c]/50">
+        <div 
+          className="w-full aspect-square border border-border/40 rounded-3xl overflow-hidden shadow-2xl p-2 bg-[#12141c]/50"
+          style={{
+            maxHeight: "calc(100vh - 290px)",
+            maxWidth: "min(100%, calc(100vh - 290px))"
+          }}
+        >
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
@@ -382,11 +416,22 @@ export default function Ludo({
         </div>
       </div>
 
+      {/* Resize Handle Divider */}
+      <div 
+        onMouseDown={startResize}
+        className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
+          isResizing ? "bg-accent active" : ""
+        }`}
+      />
+
       {/* Control panel & seats */}
-      <div className="w-full lg:w-72 flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md">
+      <div 
+        style={{ width: `${sidebarWidth}px` }}
+        className="flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md shrink-0 h-full overflow-y-auto"
+      >
         {/* Seats */}
         <div>
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3 select-none">Seats</h4>
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3 select-none">Seats</h4>
           <div className="space-y-2.5">
             {/* Red Player */}
             <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
@@ -438,7 +483,7 @@ export default function Ludo({
 
         {/* Ludo Game Manual / Rules */}
         <div className="border-t border-border/20 pt-4 text-[10px] text-muted flex flex-col gap-2.5 leading-relaxed">
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-1 select-none">How to Play</h4>
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1 select-none">How to Play</h4>
           <p>• Roll a <b>6</b> to deploy a token from home base to the track.</p>
           <p>• Move tokens forward along the track squares.</p>
           <p>• Land on an opponent's token to capture it and send it back home.</p>

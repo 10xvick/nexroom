@@ -147,7 +147,34 @@ export default function Chess({
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const peerList = Array.from(peers.values());
+  // Resize Panel States
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX - 16;
+      if (newWidth > 200 && newWidth < 500) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
   const getPeerName = (id: string) => {
     if (id === selfId) return "You";
     return peers.get(id)?.peerName || id.slice(0, 8);
@@ -216,7 +243,6 @@ export default function Chess({
     ctx.scale(dpr, dpr);
 
     const w = rect.width;
-    const h = rect.width;
     const cellSize = w / 8;
 
     for (let r = 0; r < 8; r++) {
@@ -277,29 +303,35 @@ export default function Chess({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center animate-fade-in">
+    <div className={`flex h-full p-4 overflow-hidden gap-1 ${isResizing ? "select-none" : ""}`}>
       {/* Chess Board Column */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-[440px] w-full">
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 min-h-0 overflow-y-auto pr-3">
         {/* Status Indicator */}
-        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-4 w-full backdrop-blur-md shadow-md">
+        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-3 w-full max-w-sm backdrop-blur-md shadow-md">
           {myRole ? (
             isMyTurn ? (
-              <span className="text-accent font-extrabold flex items-center justify-center gap-2 animate-pulse">
+              <span className="text-accent font-extrabold flex items-center justify-center gap-2 animate-pulse text-xs">
                 <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
                 Your turn! ({myRole === "w" ? "White" : "Black"})
               </span>
             ) : (
-              <span className="font-semibold text-muted">Waiting for opponent... ({turn === "w" ? "White" : "Black"}'s Turn)</span>
+              <span className="font-semibold text-muted text-xs">Waiting for opponent... ({turn === "w" ? "White" : "Black"}'s Turn)</span>
             )
           ) : (
             <span className="text-muted flex items-center justify-center gap-1.5 uppercase text-xs tracking-wider font-bold">
-              <ShieldAlert size={14} className="text-muted" /> Spectator Mode
+              <ShieldAlert size={12} className="text-muted" /> Spectator Mode
             </span>
           )}
         </div>
 
         {/* 8x8 Canvas Board */}
-        <div className="w-full aspect-square border border-border/40 rounded-3xl overflow-hidden shadow-2xl bg-[#12141c]/50 p-2.5">
+        <div 
+          className="w-full aspect-square border border-border/40 rounded-3xl overflow-hidden shadow-2xl bg-[#12141c]/50 p-2"
+          style={{
+            maxHeight: "calc(100vh - 240px)",
+            maxWidth: "min(100%, calc(100vh - 240px))"
+          }}
+        >
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
@@ -308,11 +340,22 @@ export default function Chess({
         </div>
       </div>
 
+      {/* Resize Handle Divider */}
+      <div 
+        onMouseDown={startResize}
+        className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
+          isResizing ? "bg-accent active" : ""
+        }`}
+      />
+
       {/* Control panel and history */}
-      <div className="w-full lg:w-72 flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md">
+      <div 
+        style={{ width: `${sidebarWidth}px` }}
+        className="flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md shrink-0 h-full overflow-y-auto"
+      >
         {/* Seats */}
         <div>
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3 select-none">Seats</h4>
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3 select-none">Seats</h4>
           <div className="space-y-2.5">
             {/* White Player */}
             <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
@@ -364,10 +407,10 @@ export default function Chess({
 
         {/* History / Log */}
         <div className="border-t border-border/20 pt-4 flex-1 flex flex-col min-h-0">
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2.5 flex items-center gap-1.5 select-none">
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2.5 flex items-center gap-1.5 select-none">
             <Play size={12} className="text-accent" /> Move Log
           </h4>
-          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[160px] bg-black/30 p-3 rounded-2xl border border-border/15 font-mono text-[11px] text-muted">
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 bg-black/30 p-3 rounded-2xl border border-border/15 font-mono text-[11px] text-muted min-h-[120px]">
             {history.length === 0 && <span className="opacity-40 select-none">No moves yet. Make a move!</span>}
             {history.map((h, idx) => (
               <div key={idx} className="flex justify-between border-b border-white/5 pb-1 font-semibold">

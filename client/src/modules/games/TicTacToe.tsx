@@ -43,6 +43,34 @@ export default function TicTacToe({
   const animationFrameIdRef = useRef<number | null>(null);
   const [hoveredCell, setHoveredCell] = useState<number | null>(null);
 
+  // Resize Panel States
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX - 16;
+      if (newWidth > 200 && newWidth < 500) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
   const peerList = Array.from(peers.values());
   const getPeerName = (id: string) => {
     if (id === selfId) return "You";
@@ -301,24 +329,24 @@ export default function TicTacToe({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 items-center lg:items-stretch justify-center animate-fade-in">
+    <div className={`flex h-full p-4 overflow-hidden gap-1 ${isResizing ? "select-none" : ""}`}>
       {/* Game Board Column */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-5 max-w-sm w-full">
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 min-h-0 overflow-y-auto pr-3">
         {/* Status Indicator Bar */}
-        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-4 w-full backdrop-blur-md shadow-md">
+        <div className="text-center bg-[#11131c]/60 border border-border/40 rounded-2xl p-3 w-full max-w-sm backdrop-blur-md shadow-md">
           {winner ? (
-            <p className="text-base font-extrabold text-success flex items-center justify-center gap-2">
-              <Trophy size={16} className="text-success animate-bounce" />
+            <p className="text-sm font-extrabold text-success flex items-center justify-center gap-2">
+              <Trophy size={14} className="text-success animate-bounce" />
               {winner === myMark ? "Victory! You win! 🎉" : `${getPeerName(gameState.players[winner])} wins! 🏆`}
             </p>
           ) : isDraw ? (
-            <p className="text-base font-extrabold text-muted">A Hard-Fought Draw! 🤝</p>
+            <p className="text-sm font-extrabold text-muted">A Draw! 🤝</p>
           ) : (
-            <div className="text-sm font-semibold text-muted">
+            <div className="text-xs font-semibold text-muted">
               {myMark ? (
                 isMyTurn ? (
                   <span className="text-accent flex items-center justify-center gap-2 animate-pulse">
-                    <Sparkles size={14} className="text-accent animate-spin" />
+                    <Sparkles size={12} className="text-accent animate-spin" />
                     Your turn! Make your move...
                   </span>
                 ) : (
@@ -326,7 +354,7 @@ export default function TicTacToe({
                 )
               ) : (
                 <span className="text-muted flex items-center justify-center gap-1.5 uppercase tracking-wider text-xs">
-                  <ShieldAlert size={13} className="text-muted" /> Spectator Mode
+                  <ShieldAlert size={12} className="text-muted" /> Spectator Mode
                 </span>
               )}
             </div>
@@ -334,7 +362,13 @@ export default function TicTacToe({
         </div>
 
         {/* 3x3 Canvas Grid */}
-        <div className="w-full aspect-square bg-[#12141c]/50 rounded-3xl border border-border/40 overflow-hidden shadow-2xl relative group">
+        <div 
+          className="w-full aspect-square bg-[#12141c]/50 rounded-3xl border border-border/40 overflow-hidden shadow-2xl relative group"
+          style={{
+            maxHeight: "calc(100vh - 240px)",
+            maxWidth: "min(100%, calc(100vh - 240px))"
+          }}
+        >
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
@@ -348,21 +382,32 @@ export default function TicTacToe({
 
         {/* Local Reset */}
         {(winner || isDraw) && (
-          <button className="btn-primary w-full py-3 rounded-2xl text-sm font-bold animate-slide-up" onClick={resetBoard}>
+          <button className="btn-primary w-full max-w-sm py-2.5 rounded-2xl text-xs font-bold animate-slide-up" onClick={resetBoard}>
             Start Next Match
           </button>
         )}
       </div>
 
+      {/* Resize Handle Divider */}
+      <div 
+        onMouseDown={startResize}
+        className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
+          isResizing ? "bg-accent active" : ""
+        }`}
+      />
+
       {/* Players List & Scoreboard Panel */}
-      <div className="w-full lg:w-72 flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md">
+      <div 
+        style={{ width: `${sidebarWidth}px` }} 
+        className="flex flex-col gap-4 bg-[#11131c]/40 border border-border/40 rounded-3xl p-5 shadow-lg backdrop-blur-md shrink-0 h-full overflow-y-auto"
+      >
         <div>
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3 select-none">Roles</h4>
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3 select-none">Roles</h4>
           <div className="space-y-2.5">
             {/* Player X */}
             <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-accent font-black text-base w-6 text-center select-none">X</span>
+                <span className="text-accent font-black text-sm w-6 text-center select-none">X</span>
                 <span className="text-xs font-bold text-white truncate max-w-[120px]">
                   {playerX ? getPeerName(playerX) : "Empty Seat"}
                 </span>
@@ -385,7 +430,7 @@ export default function TicTacToe({
             {/* Player O */}
             <div className="flex items-center justify-between p-3 rounded-2xl border border-border/20 bg-surface/30">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-warn font-black text-base w-6 text-center select-none">O</span>
+                <span className="text-warn font-black text-sm w-6 text-center select-none">O</span>
                 <span className="text-xs font-bold text-white truncate max-w-[120px]">
                   {playerO ? getPeerName(playerO) : "Empty Seat"}
                 </span>
@@ -409,25 +454,25 @@ export default function TicTacToe({
 
         {/* Score Board */}
         <div className="border-t border-border/20 pt-4">
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2.5 flex items-center gap-1.5 select-none">
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2.5 flex items-center gap-1.5 select-none">
             <Award size={12} /> Scoreboard
           </h4>
           <div className="grid grid-cols-2 text-center border border-border/20 bg-surface/30 rounded-2xl py-3.5">
             <div>
               <p className="text-[10px] text-muted font-extrabold uppercase tracking-wider">X Matches</p>
-              <p className="text-xl font-black text-white mt-1">{scoreX}</p>
+              <p className="text-lg font-black text-white mt-1">{scoreX}</p>
             </div>
             <div className="border-l border-border/20">
               <p className="text-[10px] text-muted font-extrabold uppercase tracking-wider">O Matches</p>
-              <p className="text-xl font-black text-white mt-1">{scoreO}</p>
+              <p className="text-lg font-black text-white mt-1">{scoreO}</p>
             </div>
           </div>
         </div>
 
         {/* Spectators List */}
         <div className="border-t border-border/20 pt-4 flex-1 flex flex-col min-h-0">
-          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2 select-none">Spectators</h4>
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[140px]">
+          <h4 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2 select-none">Spectators</h4>
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {peerList
               .filter((p) => p.peerId !== playerX && p.peerId !== playerO)
               .map((p) => (

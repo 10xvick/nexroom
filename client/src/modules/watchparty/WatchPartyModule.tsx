@@ -47,6 +47,33 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
   const [duration, setDuration] = useState(0);
   const [reactions, setReactions] = useState<{ id: string; emoji: string; x: number }[]>([]);
 
+  const [sidebarWidth, setSidebarWidth] = useState(340);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX - 16;
+      if (newWidth > 240 && newWidth < 600) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -378,7 +405,7 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-full gap-4 p-4 max-h-screen overflow-hidden">
+    <div className={`flex h-full p-4 overflow-hidden gap-1 ${isResizing ? "select-none" : ""}`}>
       <style>{`
         @keyframes floatUp {
           0% {
@@ -405,7 +432,7 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
       `}</style>
 
       {/* Left side: Video Player and Media controls */}
-      <div className="flex-[2] flex flex-col gap-4 min-h-0 overflow-y-auto pr-1">
+      <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto pr-3">
         {/* URL input */}
         <div className="flex gap-2">
           <div className="flex-1 relative">
@@ -509,9 +536,22 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
         )}
       </div>
 
+      {/* Resize Handle Divider */}
+      {videoId && (
+        <div 
+          onMouseDown={startResize}
+          className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
+            isResizing ? "bg-accent active" : ""
+          }`}
+        />
+      )}
+
       {/* Right side: Reused Chat Panel */}
       {videoId && (
-        <div className="flex-[1] flex flex-col min-w-[320px] bg-surface/20 border border-border rounded-xl overflow-hidden h-full">
+        <div 
+          style={{ width: `${sidebarWidth}px` }} 
+          className="flex flex-col bg-surface/20 border border-border rounded-xl overflow-hidden h-full shrink-0"
+        >
           <div className="px-4 py-3 border-b border-border bg-surface/40">
             <h3 className="text-sm font-semibold text-white">Watch Party Chat</h3>
           </div>

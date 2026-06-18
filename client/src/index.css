@@ -10,13 +10,14 @@
   box-sizing: border-box;
 }
 
-body {
+body, html, #root {
   background-color: #0b0c10;
   color: #e2e8f0;
-  font-family: "Outfit", "Inter", system-ui, sans-serif;
+  font-family: "Inter", system-ui, sans-serif;
   margin: 0;
-  min-height: 100vh;
-  overflow-x: hidden;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
 }
 
 /* Custom Sleek Scrollbar */
@@ -35,83 +36,41 @@ body {
   background: #374151;
 }
 
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes scaleIn {
-  from { transform: scale(0.96); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
-
-@keyframes slideUp {
-  from { transform: translateY(12px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes pulseGlow {
-  0%, 100% { box-shadow: 0 0 16px rgba(79, 142, 247, 0.1); }
-  50% { box-shadow: 0 0 28px rgba(79, 142, 247, 0.25); }
-}
-
-@keyframes rotateDice {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
-}
-
-.animate-scale-in {
-  animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-slide-up {
-  animation: slideUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-/* Premium Glassmorphic Classes */
+/* Clean, Simple Glass Container */
 .glass {
-  background: rgba(17, 20, 28, 0.75);
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border: 1px solid rgba(255, 255, 255, 0.065);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-}
-
-.glass-glow {
-  background: rgba(17, 20, 28, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(79, 142, 247, 0.2);
-  box-shadow: 0 8px 32px 0 rgba(79, 142, 247, 0.1);
-  animation: pulseGlow 4s infinite ease-in-out;
+  background: #161a22;
+  border: 1px solid #252c38;
 }
 
 .btn {
-  @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 cursor-pointer select-none active:scale-[0.98] outline-none;
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-150 cursor-pointer select-none active:scale-[0.98] outline-none;
 }
 .btn-primary {
-  @apply btn bg-accent hover:bg-accent-dim text-white shadow-[0_4px_16px_rgba(79,142,247,0.25)] hover:shadow-[0_6px_20px_rgba(79,142,247,0.35)];
+  @apply btn bg-accent hover:bg-accent-dim text-white;
 }
 .btn-ghost {
-  @apply btn bg-surface/40 hover:bg-surface border border-border/60 hover:border-accent/30 text-muted hover:text-white;
+  @apply btn bg-transparent hover:bg-surface border border-border text-muted hover:text-white;
 }
 .btn-danger {
-  @apply btn bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30 hover:border-danger/50 shadow-sm;
+  @apply btn bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30 hover:border-danger/50;
 }
 
-/* Enhanced Inputs */
+/* Inputs */
 input[type="text"],
 input[type="url"],
 textarea,
 select {
-  @apply bg-surface/40 border border-border/60 rounded-xl px-4 py-2.5 text-sm text-white outline-none transition-all duration-200 focus:border-accent/60 focus:bg-surface/70 focus:shadow-[0_0_12px_rgba(79,142,247,0.1)];
+  @apply bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white outline-none transition-colors focus:border-accent;
 }
 
 .tag {
-  @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold tracking-wide uppercase;
+  @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+}
+
+/* Resizable divider styles */
+.resize-handle {
+  transition: background-color 0.15s ease;
+}
+.resize-handle:hover, .resize-handle.active {
+  background-color: #4f8ef7 !important;
 }

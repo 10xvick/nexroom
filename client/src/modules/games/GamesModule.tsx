@@ -146,7 +146,7 @@ export default function GamesModule(props: ModuleProps) {
             Reset Game
           </button>
         </div>
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-hidden">
           <TicTacToe
             {...props}
             gameState={state}
@@ -173,7 +173,7 @@ export default function GamesModule(props: ModuleProps) {
             Reset Board
           </button>
         </div>
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-hidden">
           <Chess
             {...props}
             gameState={state}
@@ -200,7 +200,7 @@ export default function GamesModule(props: ModuleProps) {
             Reset Board
           </button>
         </div>
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-hidden">
           <Ludo
             {...props}
             gameState={state}
