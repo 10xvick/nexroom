@@ -1,32 +1,15 @@
 import React from "react";
 import { registerModule } from "../core/moduleRegistry";
-import ChatModule from "./chat/ChatModule";
-import CollabModule from "./collab/CollabModule";
 import WatchPartyModule from "./watchparty/WatchPartyModule";
 import GamesModule from "./games/GamesModule";
 import WhiteboardModule from "./whiteboard/WhiteboardModule";
-import FileSharingModule from "./filesharing/FileSharingModule";
-import { MessageSquare, Code2, Tv, Gamepad2, Palette, FolderUp } from "lucide-react";
+import CollabModule from "./collab/CollabModule";
+import SettingsModule from "./settings/SettingsModule";
+import { Code2, Tv, Gamepad2, Palette, Settings } from "lucide-react";
 
 // ─── Register all built-in modules ───────────────────────────────────────────
 // To add a new module: import its component and call registerModule() here.
 // To remove a module: delete its registerModule() call.
-
-registerModule({
-  id: "chat",
-  label: "Chat",
-  icon: React.createElement(MessageSquare, { size: 20 }),
-  description: "Real-time text messaging",
-  component: ChatModule,
-});
-
-registerModule({
-  id: "collab",
-  label: "Code",
-  icon: React.createElement(Code2, { size: 20 }),
-  description: "Live collaborative code editor",
-  component: CollabModule,
-});
 
 registerModule({
   id: "watchparty",
@@ -38,7 +21,7 @@ registerModule({
 
 registerModule({
   id: "games",
-  label: "Games",
+  label: "Game Party",
   icon: React.createElement(Gamepad2, { size: 20 }),
   description: "Multiplayer mini-games",
   component: GamesModule,
@@ -46,16 +29,25 @@ registerModule({
 
 registerModule({
   id: "whiteboard",
-  label: "Whiteboard",
+  label: "Draw Party",
   icon: React.createElement(Palette, { size: 20 }),
   description: "Collaborative drawing canvas",
   component: WhiteboardModule,
 });
 
 registerModule({
-  id: "filesharing",
-  label: "File Share",
-  icon: React.createElement(FolderUp, { size: 20 }),
-  description: "Direct P2P file sharing",
-  component: FileSharingModule,
+  id: "collab",
+  label: "Code Party",
+  icon: React.createElement(Code2, { size: 20 }),
+  description: "Live collaborative code editor",
+  component: CollabModule,
 });
+
+registerModule({
+  id: "settings",
+  label: "Settings",
+  icon: React.createElement(Settings, { size: 20 }),
+  description: "Personal and room preferences",
+  component: SettingsModule,
+});
+

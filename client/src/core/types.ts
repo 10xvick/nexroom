@@ -25,6 +25,27 @@ export interface ModuleEventEnvelope {
   from: string;
 }
 
+export interface FileMetadata {
+  fileId: string;
+  name: string;
+  size: number;
+  type: string;
+  totalChunks: number;
+}
+
+export interface FileTransferState {
+  fileId: string;
+  moduleId: string;
+  name: string;
+  size: number;
+  type: string;
+  progress: number;
+  status: "idle" | "sending" | "receiving" | "completed" | "failed";
+  direction: "send" | "receive";
+  peerId: string;
+  downloadUrl?: string;
+}
+
 // ─── Module Registry ──────────────────────────────────────────────────────────
 
 export interface NexModule {
@@ -44,6 +65,7 @@ export interface ModuleProps {
   selfId: string;
   selfName: string;
   peers: Map<string, PeerConnection>;
+  isActive?: boolean;
   sendModuleEvent: (event: string, payload: unknown, to?: string) => void;
   onModuleEvent: (handler: (env: ModuleEventEnvelope) => void) => () => void;
 }

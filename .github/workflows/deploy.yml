@@ -21,11 +21,6 @@ jobs:
         with:
           path: nexroom
 
-      - name: Checkout shared-chat
-        uses: actions/checkout@v6
-        with:
-          repository: 10xvick/shared-chat
-          path: shared-chat
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -37,13 +32,6 @@ jobs:
       - name: Upgrade npm
         run: npm install -g npm@11
 
-      - name: Install shared-chat dependencies
-        run: npm install
-        working-directory: shared-chat
-
-      - name: Build shared-chat
-        run: npm run build
-        working-directory: shared-chat
 
       - name: Install client dependencies
         run: npm install

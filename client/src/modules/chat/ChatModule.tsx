@@ -2,14 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { useWebRTC } from "../../core/WebRTCContext";
 import { useFileTransfer } from "../../core/useFileTransfer";
 import type { ModuleProps } from "../../core/types";
-import { RoomChat, ChatMessage } from "shared-chat";
+import RoomChat from "./shared-chat/RoomChat";
+import type { ChatMessage } from "./shared-chat/types";
 
-export default function ChatModule({ selfId, selfName, peers, onModuleEvent }: ModuleProps) {
+export default function ChatModule({ selfId, selfName, peers, sendModuleEvent, onModuleEvent, isActive = true }: ModuleProps) {
   const { getModuleState, setModuleState, syncModuleState } = useWebRTC();
   const [messages, setMessagesState] = useState<ChatMessage[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
 
-  const { transfers, startFileTransfer, cancelTransfer } = useFileTransfer("chat");
+  const { transfers, startFileTransfer, cancelTransfer, requestDownload } = useFileTransfer(
+    "chat",
+    isActive
+  );
 
   function setMessages(msgs: ChatMessage[]) {
     setMessagesState(msgs);
@@ -76,6 +80,7 @@ export default function ChatModule({ selfId, selfName, peers, onModuleEvent }: M
       onSendFile={handleSendFile}
       transfers={transfers as any}
       onCancelTransfer={cancelTransfer}
+      onStartDownload={requestDownload}
     />
   );
 }

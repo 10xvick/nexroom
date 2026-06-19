@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useWebRTC } from "../../core/WebRTCContext";
 import type { ModuleProps } from "../../core/types";
 import { Play, Pause, Link, Users, Maximize } from "lucide-react";
-import ChatModule from "../chat/ChatModule";
 
 type WPEvent =
   | { type: "load"; url: string }
@@ -37,7 +36,7 @@ function formatTime(secs: number) {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
-export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEvent, onModuleEvent }: ModuleProps) {
+export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEvent, onModuleEvent, isActive }: ModuleProps) {
   const { getModuleState, setModuleState, syncModuleState, onModuleEvent: rawOnModuleEvent, sendModuleEvent: rawSendModuleEvent, room } = useWebRTC();
   const [videoUrl, setVideoUrl] = useState("");
   const [inputUrl, setInputUrl] = useState("");
@@ -45,35 +44,6 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [reactions, setReactions] = useState<{ id: string; emoji: string; x: number }[]>([]);
-
-  const [sidebarWidth, setSidebarWidth] = useState(340);
-  const [isResizing, setIsResizing] = useState(false);
-
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-  };
-
-  useEffect(() => {
-    if (!isResizing) return;
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = window.innerWidth - e.clientX - 16;
-      if (newWidth > 240 && newWidth < 600) {
-        setSidebarWidth(newWidth);
-      }
-    };
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isResizing]);
-
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -82,36 +52,6 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
   const isDragging = useRef(false);
-
-  const sendForChat = useCallback(
-    (event: string, payload: unknown, to?: string) => {
-      rawSendModuleEvent("chat", event, payload, to);
-    },
-    [rawSendModuleEvent]
-  );
-
-  const onForChat = useCallback(
-    (handler: (env: any) => void) => {
-      return rawOnModuleEvent((env) => {
-        if (env.moduleId === "chat") handler(env);
-      });
-    },
-    [rawOnModuleEvent]
-  );
-
-  const spawnReaction = useCallback((emoji: string) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    const x = Math.floor(Math.random() * 80) + 10;
-    setReactions((prev) => [...prev, { id, emoji, x }]);
-    setTimeout(() => {
-      setReactions((prev) => prev.filter((r) => r.id !== id));
-    }, 4000);
-  }, []);
-
-  function sendReaction(emoji: string) {
-    sendModuleEvent("reaction", { type: "reaction", emoji });
-    spawnReaction(emoji);
-  }
 
   // ── YouTube IFrame API Loader & Player Initialization ──────────────────────
   useEffect(() => {
@@ -277,19 +217,26 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
       const ev = env.payload as any;
       suppressSync.current = true;
 
-      if (ev.type === "reaction") {
-        spawnReaction(ev.emoji);
-        suppressSync.current = false;
-        return;
-      }
-
       if (ev.type === "load") {
-        setVideoUrl(ev.url);
-        setVideoId(extractVideoId(ev.url));
-        playerReadyRef.current = false;
-        setDuration(0);
-        setCurrentTime(0);
-        lastTimeRef.current = 0;
+        if (!ev.url) {
+          setVideoId(null);
+          setVideoUrl("");
+          setCurrentTime(0);
+          setDuration(0);
+          lastTimeRef.current = 0;
+          if (playerRef.current && playerRef.current.destroy) {
+            playerRef.current.destroy();
+            playerRef.current = null;
+            playerReadyRef.current = false;
+          }
+        } else {
+          setVideoUrl(ev.url);
+          setVideoId(extractVideoId(ev.url));
+          playerReadyRef.current = false;
+          setDuration(0);
+          setCurrentTime(0);
+          lastTimeRef.current = 0;
+        }
       } else if (ev.type === "play") {
         setIsPlaying(true);
         sendPlayerCommand("playVideo");
@@ -318,6 +265,66 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
       setTimeout(() => { suppressSync.current = false; }, 300);
     });
   }, [onModuleEvent, selfId, getModuleState, syncModuleState]);
+
+  const [trendingVideos, setTrendingVideos] = useState<any[]>([]);
+  const [isLoadingTrending, setIsLoadingTrending] = useState(false);
+
+  const defaultTrending = [
+    { title: "ALPHA | Official Trailer - Alia Bhatt, Sharvari, Bobby Deol, Anil Kapoor | YRF Spy Universe", url: "https://www.youtube.com/watch?v=QRqGwGWo1Y0", id: "QRqGwGWo1Y0" },
+    { title: "LE SSERAFIM x ILLIT x KATSEYE - 'ICONIC BY MISTAKE' Official Music Video", url: "https://www.youtube.com/watch?v=27C4pfRsf9g", id: "27C4pfRsf9g" },
+    { title: "SPIDER-MAN: BRAND NEW DAY | Official Trailer - Tom Holland, Zendaya, Sadie Sink", url: "https://www.youtube.com/watch?v=aqz-KE-BPKQ", id: "aqz-KE-BPKQ" },
+    { title: "NASA Live: Official ISS Space Station Stream - Earth Views from Orbit", url: "https://www.youtube.com/watch?v=x7WZzEaFk6s", id: "x7WZzEaFk6s" }
+  ];
+
+  // Fetch trending videos on mount
+  useEffect(() => {
+    async function fetchTrending() {
+      setIsLoadingTrending(true);
+      try {
+        const res = await fetch("https://trendgetter.vercel.app/api/youtube/videos?regionCode=US&maxResults=10");
+        if (!res.ok) throw new Error("API response not OK");
+        const body = await res.json();
+        const data = body.data;
+        if (Array.isArray(data) && data.length >= 4) {
+          const formatted = data.map((v: any) => {
+            // Trendgetter API has id directly as the video ID
+            let id = v.id || v.videoId;
+            if (!id && v.url) {
+              const matches = v.url.match(/v=([^&]+)/) || v.url.match(/vi\/([^?]+)/);
+              id = matches ? matches[1] : "";
+            }
+            return {
+              title: v.title || "Trending Video",
+              channel: (v.channel_title || v.channelTitle || "").toLowerCase(),
+              description: (v.description || "").toLowerCase(),
+              url: `https://www.youtube.com/watch?v=${id}`,
+              id: id
+            };
+          }).filter(v => {
+            // Filter out videos that are highly likely to have embed restrictions
+            // e.g. VEVO music channels, auto-generated topics, official music videos (licensing blocks)
+            if (!v.id) return false;
+            if (v.channel.includes("vevo") || v.channel.includes("topic")) return false;
+            if (v.title.toLowerCase().includes("music video") || v.title.toLowerCase().includes("official mv")) return false;
+            if (v.description.includes("provided to youtube") || v.description.includes("released on:")) return false;
+            return true;
+          });
+
+          if (formatted.length >= 4) {
+            setTrendingVideos(formatted.slice(0, 4));
+            return;
+          }
+        }
+        setTrendingVideos(defaultTrending);
+      } catch (err) {
+        console.warn("Failed to fetch trending videos from API, using static default trending:", err);
+        setTrendingVideos(defaultTrending);
+      } finally {
+        setIsLoadingTrending(false);
+      }
+    }
+    fetchTrending();
+  }, []);
 
   function sendPlayerCommand(func: string, ...args: any[]) {
     const player = playerRef.current;
@@ -359,6 +366,26 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
       savePartyState({ videoUrl: inputUrl, videoId: id, isPlaying: false, time: 0 });
     }
     setInputUrl("");
+  }
+
+  function removeVideo() {
+    setVideoId(null);
+    setVideoUrl("");
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    lastTimeRef.current = 0;
+    if (playerRef.current && playerRef.current.destroy) {
+      try {
+        playerRef.current.destroy();
+      } catch (_) {}
+      playerRef.current = null;
+      playerReadyRef.current = false;
+    }
+    if (!suppressSync.current) {
+      sendModuleEvent("load", { type: "load", url: "" } as WPEvent);
+      savePartyState({ videoUrl: "", videoId: null, isPlaying: false, time: 0 });
+    }
   }
 
   function play() {
@@ -405,32 +432,7 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
   }
 
   return (
-    <div className={`flex h-full p-4 overflow-hidden gap-1 ${isResizing ? "select-none" : ""}`}>
-      <style>{`
-        @keyframes floatUp {
-          0% {
-            transform: translateY(0) scale(0.5);
-            opacity: 0;
-          }
-          10% {
-            transform: translateY(-10vh) scale(1.2);
-            opacity: 1;
-          }
-          100% {
-            transform: translateY(-50vh) scale(0.8);
-            opacity: 0;
-          }
-        }
-        .floating-reaction {
-          position: absolute;
-          bottom: 20px;
-          font-size: 3.5rem;
-          animation: floatUp 4s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
-          pointer-events: none;
-          z-index: 50;
-        }
-      `}</style>
-
+    <div className="flex h-full p-4 overflow-hidden gap-1">
       {/* Left side: Video Player and Media controls */}
       <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto pr-3">
         {/* URL input */}
@@ -454,25 +456,38 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
           <div className="flex flex-col gap-3 min-h-0">
             <div
               ref={containerRef}
-              className="relative w-full rounded-xl overflow-hidden bg-black max-h-[60vh] max-w-[100vw] mx-auto aspect-video"
+              className="relative w-full rounded-xl overflow-hidden bg-black max-h-[60vh] max-w-[100vw] mx-auto aspect-video border border-border/20"
             >
-              <div
-                id="watch-party-player"
-                className="absolute inset-0 w-full h-full border-none pointer-events-none"
-              />
-
-              {/* Floating Reactions Overlay */}
-              <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                {reactions.map((r) => (
-                  <span
-                    key={r.id}
-                    className="floating-reaction"
-                    style={{ left: `${r.x}%` }}
-                  >
-                    {r.emoji}
-                  </span>
-                ))}
+              {/* Scaled/cropped player container wrapper to mask YouTube branding & headers */}
+              <div className="absolute inset-0 w-full h-full overflow-hidden scale-[1.25] origin-center">
+                <div
+                  id="watch-party-player"
+                  className="absolute inset-0 w-full h-full border-none pointer-events-none"
+                />
               </div>
+
+              {/* Custom Thumbnail Overlay when paused/not playing */}
+              {!isPlaying && videoId && (
+                <div className="absolute inset-0 w-full h-full flex items-center justify-center transition-all duration-300 z-10">
+                  <img
+                    src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
+                    alt="Video thumbnail"
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/50" />
+                  
+                  {/* Clean play button overlay */}
+                  <button 
+                    onClick={play}
+                    className="relative z-10 w-16 h-16 flex items-center justify-center rounded-full bg-primary hover:bg-primary-hover text-white shadow-lg hover:scale-110 active:scale-95 transition-all duration-300 group"
+                  >
+                    <Play size={24} className="fill-white translate-x-0.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Custom Media Controls Card */}
@@ -506,26 +521,14 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
                 <button className="btn-ghost gap-1.5 text-xs py-1.5 px-3" onClick={toggleFullscreen}>
                   <Maximize size={14} /> Fullscreen
                 </button>
+                <button className="btn-danger gap-1.5 text-xs py-1.5 px-3" onClick={removeVideo}>
+                  Remove video
+                </button>
                 <div className="flex items-center gap-1 text-xs text-muted ml-auto">
                   <Users size={12} />
                   <span>Controls sync to all peers</span>
                 </div>
-              </div>
-
-              {/* Reaction Bar */}
-              <div className="flex items-center gap-2 border-t border-border/40 pt-2.5 mt-1">
-                <span className="text-xs text-muted font-medium mr-1">React:</span>
-                {["❤️", "😂", "😮", "😢", "🔥", "👍", "🎉", "👏", "🚀", "💡", "💯", "👀"].map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => sendReaction(emoji)}
-                    className="hover:scale-125 active:scale-90 transition-transform text-lg p-1 bg-surface hover:bg-border rounded-lg border border-border/40"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            </div>
+              </div>            </div>
           </div>
         ) : (
           <div className="flex-grow flex flex-col items-center justify-center gap-6 rounded-xl border border-dashed border-border text-muted py-12 px-6">
@@ -535,69 +538,50 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
               <p className="text-xs opacity-60">Play/pause/seek syncs to all peers in the room</p>
             </div>
             
-            <div className="w-full max-w-md border-t border-border/40 pt-6 flex flex-col gap-3">
-              <p className="text-xs font-bold text-muted uppercase tracking-wider text-center mb-1">
+            <div className="w-full max-w-2xl border-t border-border/40 pt-6 flex flex-col gap-3">
+              <p className="text-xs font-bold text-muted uppercase tracking-wider text-center mb-2">
                 Or pick a quick recommendation:
               </p>
-              <div className="grid grid-cols-1 gap-2">
-                {[
-                  { title: "🎵 Lofi Hip Hop Radio (Lofi Girl)", url: "https://www.youtube.com/watch?v=jfKfPfyJRdk" },
-                  { title: "🐰 Big Buck Bunny (Open Movie)", url: "https://www.youtube.com/watch?v=aqz-KE-BPKQ" },
-                  { title: "🚀 NASA ISS Space Station Live Stream", url: "https://www.youtube.com/watch?v=x7WZzEaFk6s" },
-                  { title: "🌊 Relaxing Ocean Waves (4K)", url: "https://www.youtube.com/watch?v=S15C421p9gM" }
-                ].map((rec) => (
+              <div className="grid grid-cols-2 gap-3">
+                {trendingVideos.map((rec) => (
                   <button
                     key={rec.url}
                     onClick={() => {
                       setInputUrl(rec.url);
-                      const id = extractVideoId(rec.url);
-                      if (id) {
-                        setVideoId(id);
-                        setVideoUrl(rec.url);
-                        playerReadyRef.current = false;
-                        setDuration(0);
-                        setCurrentTime(0);
-                        sendModuleEvent("load", { type: "load", url: rec.url } as WPEvent);
-                        savePartyState({ videoUrl: rec.url, videoId: id, isPlaying: false, time: 0 });
-                      }
+                      setVideoId(rec.id);
+                      setVideoUrl(rec.url);
+                      playerReadyRef.current = false;
+                      setDuration(0);
+                      setCurrentTime(0);
+                      sendModuleEvent("load", { type: "load", url: rec.url } as WPEvent);
+                      savePartyState({ videoUrl: rec.url, videoId: rec.id, isPlaying: false, time: 0 });
                     }}
-                    className="w-full text-left text-xs bg-surface/30 hover:bg-surface border border-border/40 hover:border-accent/50 rounded-xl px-4 py-2.5 transition-all text-white font-medium hover:scale-[1.01]"
+                    className="group w-full text-left bg-surface/30 hover:bg-surface/60 border border-border/50 hover:border-accent/80 rounded-xl overflow-hidden transition-all flex flex-col hover:scale-[1.02]"
                   >
-                    {rec.title}
+                    {/* Thumbnail Image Container */}
+                    <div className="w-full aspect-video bg-black relative overflow-hidden shrink-0 border-b border-border/20">
+                      <img 
+                        src={`https://img.youtube.com/vi/${rec.id}/mqdefault.jpg`} 
+                        alt={rec.title} 
+                        className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=320&auto=format&fit=crop&q=60";
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/15 group-hover:bg-black/0 transition-colors" />
+                    </div>
+                    {/* Title Text Area */}
+                    <div className="p-2.5 flex-1 flex flex-col justify-center">
+                      <p className="text-xs font-semibold text-white line-clamp-2 leading-relaxed group-hover:text-accent transition-colors">
+                        {rec.title}
+                      </p>
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
           </div>
         )}
-      </div>
-
-      {/* Resize Handle Divider */}
-      <div 
-        onMouseDown={startResize}
-        className={`w-[4px] cursor-col-resize hover:bg-accent bg-border/40 transition-colors mx-1 shrink-0 self-stretch rounded ${
-          isResizing ? "bg-accent active" : ""
-        }`}
-      />
-
-      {/* Right side: Reused Chat Panel */}
-      <div 
-        style={{ width: `${sidebarWidth}px` }} 
-        className="flex flex-col bg-surface/20 border border-border rounded-xl overflow-hidden h-full shrink-0"
-      >
-        <div className="px-4 py-3 border-b border-border bg-surface/40">
-          <h3 className="text-sm font-semibold text-white">Watch Party Chat</h3>
-        </div>
-        <div className="flex-1 min-h-0">
-          <ChatModule
-            room={room!}
-            selfId={selfId}
-            selfName={selfName}
-            peers={peers}
-            sendModuleEvent={sendForChat}
-            onModuleEvent={onForChat}
-          />
-        </div>
       </div>
     </div>
   );

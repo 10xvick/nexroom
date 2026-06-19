@@ -1,17 +1,17 @@
 import React, { useState } from "react";
 import type { ModuleProps } from "../../core/types";
 import { useFileTransfer } from "../../core/useFileTransfer";
-import { formatSize, getFileIcon } from "shared-chat";
+import { formatSize, getFileIcon } from "../chat/shared-chat/utils";
 import { 
   FolderUp, FileDown, CheckCircle2, ShieldAlert, Loader, 
   XCircle, Users 
 } from "lucide-react";
 
-export default function FileSharingModule({ selfId, peers }: ModuleProps) {
+export default function FileSharingModule({ selfId, peers, isActive = true }: ModuleProps) {
   const [targetPeerId, setTargetPeerId] = useState<string>("all");
   const [dragActive, setDragActive] = useState(false);
   
-  const { transfers, startFileTransfer, cancelTransfer } = useFileTransfer("filesharing");
+  const { transfers, startFileTransfer, cancelTransfer } = useFileTransfer("filesharing", isActive);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

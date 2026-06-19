@@ -4,11 +4,12 @@ import {
   useContext,
   useRef,
   useState,
+  useEffect,
   type ReactNode,
 } from "react";
 import mqtt from "mqtt";
 import { Peer } from "peerjs";
-import type { ModuleEventEnvelope, PeerConnection, Room } from "./types";
+import type { ModuleEventEnvelope, PeerConnection, Room, FileMetadata, FileTransferState } from "./types";
 import {
   ICE_SERVERS,
   gatherCandidates,
@@ -63,6 +64,14 @@ interface WebRTCCtx {
   // Modules
   sendModuleEvent: (moduleId: string, event: string, payload: unknown, to?: string) => void;
   onModuleEvent: (handler: (env: ModuleEventEnvelope) => void) => () => void;
+
+  // Global File Transfers
+  transfers: Record<string, FileTransferState>;
+  startFileTransfer: (moduleId: string, file: File, targetPeerId: string) => string | null;
+  cancelTransfer: (moduleId: string, fileId: string) => void;
+  requestFileDownload: (fileId: string) => void;
+
+  setSelfName: (name: string) => void;
 }
 
 const Ctx = createContext<WebRTCCtx>({} as WebRTCCtx);
@@ -916,6 +925,232 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     return () => { moduleHandlers.current.delete(handler); };
   }, []);
 
+  // ── Global File Transfer Logic ───────────────────────────────────────────────
+  const [transfers, setTransfers] = useState<Record<string, FileTransferState>>({});
+  const sendingFilesRef = useRef<Record<string, { file: File; totalChunks: number }>>({});
+  const receivingChunksRef = useRef<Record<string, { chunks: (string | undefined)[]; meta: FileMetadata; fromPeer: string; moduleId: string }>>({});
+
+  const updateTransfer = useCallback((fileId: string, update: Partial<FileTransferState>) => {
+    setTransfers((prev) => {
+      const existing = prev[fileId] || {};
+      return {
+        ...prev,
+        [fileId]: { ...existing, ...update } as FileTransferState,
+      };
+    });
+  }, []);
+
+  const sendChunk = useCallback((moduleId: string, fileId: string, chunkIdx: number, toPeerId: string) => {
+    const task = sendingFilesRef.current[fileId];
+    if (!task) return;
+
+    const start = chunkIdx * 16384;
+    const end = Math.min(start + 16384, task.file.size);
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (!result) return;
+
+      sendModuleEvent(
+        moduleId,
+        "file:chunk",
+        {
+          fileId,
+          chunkIndex: chunkIdx,
+          data: result.split(",")[1], // base64 only
+        },
+        toPeerId
+      );
+
+      const progress = chunkIdx + 1 === task.totalChunks 
+        ? 100 
+        : Math.min(Math.floor(((chunkIdx + 1) / task.totalChunks) * 100), 99);
+
+      if (chunkIdx + 1 >= task.totalChunks) {
+        updateTransfer(fileId, { status: "completed", progress: 100 });
+        delete sendingFilesRef.current[fileId];
+      } else {
+        updateTransfer(fileId, { progress });
+      }
+    };
+
+    reader.readAsDataURL(task.file.slice(start, end));
+  }, [sendModuleEvent, updateTransfer]);
+
+  // Hook up the global file transfer listener
+  useEffect(() => {
+    if (phase !== "in_room") return;
+
+    const cleanup = onModuleEvent((env) => {
+      const { moduleId, event, payload } = env;
+      const data = payload as any;
+
+      if (event === "file:start") {
+        const meta = data as FileMetadata;
+        receivingChunksRef.current[meta.fileId] = {
+          chunks: new Array(meta.totalChunks).fill(undefined),
+          meta,
+          fromPeer: env.from,
+          moduleId,
+        };
+
+        const autoDownload = localStorage.getItem("nexroom_autodownload") !== "false";
+
+        const newTransfer: FileTransferState = {
+          fileId: meta.fileId,
+          moduleId,
+          name: meta.name,
+          size: meta.size,
+          type: meta.type,
+          progress: 0,
+          status: autoDownload ? "receiving" : "idle",
+          direction: "receive",
+          peerId: env.from,
+        };
+
+        setTransfers((prev) => ({
+          ...prev,
+          [meta.fileId]: newTransfer,
+        }));
+
+        if (autoDownload) {
+          sendModuleEvent(moduleId, "file:ack", { fileId: meta.fileId, chunkIndex: -1 }, env.from);
+        }
+      }
+
+      else if (event === "file:chunk") {
+        const { fileId, chunkIndex, data: chunkData } = data;
+        const entry = receivingChunksRef.current[fileId];
+        if (!entry) return;
+
+        entry.chunks[chunkIndex] = chunkData;
+        const received = entry.chunks.filter((c) => c !== undefined).length;
+        const total = entry.meta.totalChunks;
+        
+        const progress = received === total 
+          ? 100 
+          : Math.min(Math.floor((received / total) * 100), 99);
+
+        const status = progress === 100 ? "completed" : "receiving";
+        updateTransfer(fileId, { progress, status });
+
+        if (progress === 100) {
+          try {
+            const byteArrays = entry.chunks.map((base64) => {
+              const binary = atob(base64!);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+              }
+              return bytes;
+            });
+            const blob = new Blob(byteArrays, { type: entry.meta.type || "application/octet-stream" });
+            const downloadUrl = URL.createObjectURL(blob);
+
+            updateTransfer(fileId, { status: "completed", progress: 100, downloadUrl });
+            delete receivingChunksRef.current[fileId];
+          } catch (e) {
+            console.error("Failed to reassemble file:", e);
+            updateTransfer(fileId, { status: "failed" });
+          }
+        } else {
+          sendModuleEvent(moduleId, "file:ack", { fileId, chunkIndex }, env.from);
+        }
+      }
+
+      else if (event === "file:ack") {
+        const { fileId, chunkIndex } = data;
+        const task = sendingFilesRef.current[fileId];
+        if (!task) return;
+
+        const nextChunk = chunkIndex + 1;
+        if (nextChunk < task.totalChunks) {
+          sendChunk(moduleId, fileId, nextChunk, env.from);
+        } else {
+          updateTransfer(fileId, { status: "completed", progress: 100 });
+          delete sendingFilesRef.current[fileId];
+        }
+      }
+
+      else if (event === "file:cancel") {
+        const { fileId } = data;
+        delete sendingFilesRef.current[fileId];
+        delete receivingChunksRef.current[fileId];
+        updateTransfer(fileId, { status: "failed" });
+      }
+    });
+
+    return cleanup;
+  }, [phase, onModuleEvent, sendModuleEvent, sendChunk, updateTransfer]);
+
+  const startFileTransfer = useCallback((moduleId: string, file: File, targetPeerId: string) => {
+    const activePeers = Array.from(peersRef.current.values());
+    if (activePeers.length === 0) return null;
+
+    const targets = targetPeerId === "all"
+      ? activePeers
+      : activePeers.filter((p) => p.peerId === targetPeerId);
+
+    const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const totalChunks = Math.ceil(file.size / 16384);
+    const localUrl = URL.createObjectURL(file);
+
+    sendingFilesRef.current[fileId] = { file, totalChunks };
+
+    setTransfers((prev) => {
+      const next = { ...prev };
+      targets.forEach((peer) => {
+        next[fileId] = {
+          fileId,
+          moduleId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          progress: 0,
+          status: "sending",
+          direction: "send",
+          peerId: peer.peerId,
+          downloadUrl: localUrl,
+        };
+      });
+      return next;
+    });
+
+    targets.forEach((peer) => {
+      const meta: FileMetadata = { fileId, name: file.name, size: file.size, type: file.type, totalChunks };
+      sendModuleEvent(moduleId, "file:start", meta, peer.peerId);
+    });
+
+    return fileId;
+  }, [sendModuleEvent]);
+
+  const cancelTransfer = useCallback((moduleId: string, fileId: string) => {
+    const t = transfers[fileId];
+    if (!t) return;
+    sendModuleEvent(moduleId, "file:cancel", { fileId }, t.peerId);
+    delete sendingFilesRef.current[fileId];
+    delete receivingChunksRef.current[fileId];
+    updateTransfer(fileId, { status: "failed" });
+  }, [transfers, sendModuleEvent, updateTransfer]);
+
+  const requestFileDownload = useCallback((fileId: string) => {
+    const entry = receivingChunksRef.current[fileId];
+    if (!entry) return;
+
+    // Transition state from idle to receiving
+    updateTransfer(fileId, { status: "receiving", progress: 0 });
+
+    // Send the first file ack to start the transfer
+    sendModuleEvent(entry.moduleId || "chat", "file:ack", { fileId, chunkIndex: -1 }, entry.fromPeer);
+  }, [sendModuleEvent, updateTransfer]);
+
+  const updateSelfName = useCallback((name: string) => {
+    setSelfName(name);
+    selfNameRef.current = name;
+    localStorage.setItem("nexroom_selfname", name);
+  }, []);
+
   return (
     <Ctx.Provider value={{
       phase, myCode, gatherError, signalingMethod,
@@ -925,6 +1160,8 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       localStream, micEnabled, camEnabled, isScreenSharing,
       toggleMic, toggleCam, startScreenShare, stopScreenShare, leaveRoom,
       sendModuleEvent, onModuleEvent,
+      transfers, startFileTransfer, cancelTransfer, requestFileDownload,
+      setSelfName: updateSelfName,
     }}>
       {children}
     </Ctx.Provider>
