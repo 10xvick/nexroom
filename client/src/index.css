@@ -74,3 +74,13 @@ select {
 .resize-handle:hover, .resize-handle.active {
   background-color: #4f8ef7 !important;
 }
+
+/* Hide scrollbar utility */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+

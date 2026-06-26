@@ -39,8 +39,8 @@ interface WebRTCCtx {
   syncModuleState: (moduleId: string) => void;
 
   // Signaling actions
-  startHost: (myName: string, roomName: string) => Promise<void>;
-  startGuest: (roomCode: string, myName: string) => Promise<void>;
+  startHost: (myName: string, roomName: string, preferredMethod?: "auto" | "mqtt" | "peerjs" | "manual", timeoutSeconds?: number) => Promise<void>;
+  startGuest: (roomCode: string, myName: string, preferredMethod?: "auto" | "mqtt" | "peerjs" | "manual", timeoutSeconds?: number) => Promise<void>;
   completeHandshake: (answerCode: string) => Promise<void>;
   generateInvite: () => Promise<void>;
 
@@ -89,17 +89,25 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
   const [camEnabled, setCamEnabled] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [signalingMethod, setSignalingMethod] = useState<"mqtt" | "peerjs" | "manual" | null>(null);
+  const signalingMethodRef = useRef<"mqtt" | "peerjs" | "manual" | null>(null);
+
+  const updateSignalingMethod = useCallback((method: "mqtt" | "peerjs" | "manual" | null) => {
+    setSignalingMethod(method);
+    signalingMethodRef.current = method;
+  }, []);
 
   const hasRealMediaRef = useRef(false);
 
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const moduleHandlers = useRef<Set<(env: ModuleEventEnvelope) => void>>(new Set());
-  const pendingPCRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const pendingPCRef = useRef<Map<string, PeerConnection>>(new Map());
   const roomRef = useRef<Room | null>(null);
   const selfNameRef = useRef("");
   const mqttClientRef = useRef<any>(null);
   const peerjsRef = useRef<any>(null);
+  const isHostRef = useRef(false);
+  const activeHeartbeats = useRef<Map<string, { lastPong: number; isReconnecting: boolean; intervalId: number }>>(new Map());
 
   // Centralized key-value state store with timestamps
   const moduleStatesRef = useRef<Record<string, { data: any; timestamp: number }>>({});
@@ -237,8 +245,113 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
 
   // ── Peer connection management ──────────────────────────────────────────────
 
-  function wirePC(pc: RTCPeerConnection, peerId: string, peerName: string): PeerConnection {
-    const dataChannels = new Map<string, RTCDataChannel>();
+  async function reconnectMQTTGuest(upperCode: string) {
+    console.log("Guest attempting background MQTT reconnection...");
+    try {
+      pendingPCRef.current.delete("host");
+
+      let client = mqttClientRef.current;
+      if (!client || !client.connected) {
+        if (client) client.end();
+        client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
+          connectTimeout: 4000,
+          reconnectPeriod: 0,
+        });
+        mqttClientRef.current = client;
+      }
+
+      client.subscribe(`webrtc-v3/${upperCode}/answer`, { qos: 1 });
+
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const tempConn: PeerConnection = { peerId: "host", peerName: "", pc, dataChannels: new Map() };
+      pendingPCRef.current.set("host", tempConn);
+      createDataChannel(tempConn, "nexroom");
+
+      const { sdp, candidates } = await gatherCandidates(pc, "offer");
+      const offerPayload = {
+        sdp,
+        candidates,
+        senderId: selfId,
+        senderName: selfNameRef.current,
+      };
+
+      client.publish(`webrtc-v3/${upperCode}/knock`, JSON.stringify(offerPayload), { qos: 1, retain: true });
+    } catch (e) {
+      console.error("Error in MQTT background reconnect:", e);
+    }
+  }
+
+  async function reconnectPeerJSGuest(upperCode: string) {
+    console.log("Guest attempting background PeerJS reconnection...");
+    try {
+      let peer = peerjsRef.current;
+      if (!peer || peer.destroyed) {
+        peer = new Peer();
+        peerjsRef.current = peer;
+      }
+
+      const doConnect = () => {
+        const conn = peer.connect(`nexroom-${upperCode}`, {
+          metadata: { name: selfNameRef.current }
+        });
+
+        conn.on("open", () => {
+          const pc = conn.peerConnection;
+          const peerConnObj = wirePC(pc, "host", "Host");
+          createDataChannel(peerConnObj, "nexroom");
+
+          if (localStreamRef.current) {
+            peer.call(`nexroom-${upperCode}`, localStreamRef.current);
+          }
+        });
+      };
+
+      if (peer.open) {
+        doConnect();
+      } else {
+        peer.on("open", () => {
+          doConnect();
+        });
+      }
+    } catch (e) {
+      console.error("Error in PeerJS background reconnect:", e);
+    }
+  }
+
+  function triggerPeerReconnection(peerId: string) {
+    if (isHostRef.current) {
+      console.log(`Host waiting for guest (${peerId}) to reconnect...`);
+      return;
+    }
+
+    const upperCode = roomRef.current?.id;
+    if (!upperCode) return;
+
+    const method = signalingMethodRef.current;
+    if (method === "mqtt") {
+      reconnectMQTTGuest(upperCode);
+    } else if (method === "peerjs") {
+      reconnectPeerJSGuest(upperCode);
+    }
+  }
+
+  function wirePC(
+    pc: RTCPeerConnection,
+    peerId: string,
+    peerName: string,
+    existingDataChannels?: Map<string, RTCDataChannel>
+  ): PeerConnection {
+    const existing = peersRef.current.get(peerId);
+    if (existing && existing.pc !== pc) {
+      console.log(`Closing existing peer connection for ${peerId} to prevent orphaned socket.`);
+      try {
+        existing.pc.close();
+      } catch (err) {
+        console.error(`Error closing old pc for ${peerId}:`, err);
+      }
+    }
+
+    const dataChannels = existingDataChannels ?? new Map<string, RTCDataChannel>();
     const conn: PeerConnection = { peerId, peerName, pc, dataChannels };
     peersRef.current.set(peerId, conn);
 
@@ -261,9 +374,24 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       const s = pc.connectionState;
       if (s === "connected") {
         const c = peersRef.current.get(peerId);
-        if (c) { peersRef.current.set(peerId, c); updatePeers(); }
+        if (c) { 
+          c.reconnecting = false;
+          peersRef.current.set(peerId, c); 
+          updatePeers(); 
+        }
       }
-      if (s === "failed" || s === "closed") removePeer(peerId);
+      if (s === "failed") {
+        console.warn(`Connection failed for peer ${peerId}. Triggering reconnection...`);
+        const c = peersRef.current.get(peerId);
+        if (c) {
+          c.reconnecting = true;
+          updatePeers();
+        }
+        triggerPeerReconnection(peerId);
+      }
+      if (s === "closed") {
+        removePeer(peerId);
+      }
     };
 
     updatePeers();
@@ -299,12 +427,82 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       };
     }
 
+    if (dc.label === "nexroom") {
+      const existing = activeHeartbeats.current.get(peerId);
+      if (existing) {
+        clearInterval(existing.intervalId);
+      }
+
+      const intervalId = window.setInterval(() => {
+        const hb = activeHeartbeats.current.get(peerId);
+        if (!hb) return;
+
+        const timeSinceLastPong = Date.now() - hb.lastPong;
+        if (timeSinceLastPong > 10000) {
+          if (!hb.isReconnecting) {
+            console.warn(`Data channel heartbeat timeout for peer ${peerId}. Triggering reconnection...`);
+            hb.isReconnecting = true;
+            
+            const p = peersRef.current.get(peerId);
+            if (p) {
+              p.reconnecting = true;
+              updatePeers();
+            }
+            
+            triggerPeerReconnection(peerId);
+          }
+        } else {
+          if (dc.readyState === "open") {
+            try {
+              dc.send(JSON.stringify({ moduleId: "system", event: "ping", from: selfId }));
+            } catch (_) {}
+          }
+        }
+      }, 3000);
+
+      activeHeartbeats.current.set(peerId, {
+        lastPong: Date.now(),
+        isReconnecting: false,
+        intervalId,
+      });
+    }
+
     dc.onmessage = (ev) => {
       try {
         const env: ModuleEventEnvelope = JSON.parse(ev.data);
 
         // Standardized sync protocol interceptor
         if (env.moduleId === "system") {
+          if (env.event === "ping") {
+            const reply = {
+              moduleId: "system",
+              event: "pong",
+              from: selfId,
+            };
+            if (dc.readyState === "open") {
+              try {
+                dc.send(JSON.stringify(reply));
+              } catch (_) {}
+            }
+            return;
+          }
+
+          if (env.event === "pong") {
+            const hb = activeHeartbeats.current.get(peerId);
+            if (hb) {
+              hb.lastPong = Date.now();
+              if (hb.isReconnecting) {
+                hb.isReconnecting = false;
+                const p = peersRef.current.get(peerId);
+                if (p) {
+                  p.reconnecting = false;
+                  updatePeers();
+                }
+              }
+            }
+            return;
+          }
+
           if (env.event === "state:request") {
             const payload = env.payload as any;
             const reqModuleId = payload.moduleId;
@@ -361,6 +559,11 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
   }
 
   function removePeer(peerId: string) {
+    const hb = activeHeartbeats.current.get(peerId);
+    if (hb) {
+      clearInterval(hb.intervalId);
+      activeHeartbeats.current.delete(peerId);
+    }
     const c = peersRef.current.get(peerId);
     if (c) { c.pc.close(); peersRef.current.delete(peerId); updatePeers(); }
     setRoom((r) => r ? { ...r, peers: r.peers.filter((p) => p.id !== peerId) } : r);
@@ -368,7 +571,8 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
 
   // ── Host path ───────────────────────────────────────────────────────────────
 
-  async function startHost(myName: string, roomName: string) {
+  async function startHost(myName: string, roomName: string, preferredMethod: "auto" | "mqtt" | "peerjs" | "manual" = "auto", timeoutSeconds = 30) {
+    isHostRef.current = true;
     setSelfName(myName);
     selfNameRef.current = myName;
     const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -379,30 +583,73 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setGatherError("");
     setMyCode(roomId);
 
+    if (preferredMethod === "manual") {
+      tryManualHost(myName, roomName);
+      return;
+    }
+
+    if (preferredMethod === "peerjs") {
+      tryPeerJSHost(myName, roomName, roomId, timeoutSeconds);
+      return;
+    }
+
+    if (preferredMethod === "mqtt") {
+      tryMQTTHost(myName, roomName, roomId, timeoutSeconds);
+      return;
+    }
+
     try {
       initializeDummyStream();
-      console.log("Attempting MQTT signaling...");
+      console.log("Racing MQTT and PeerJS signaling...");
+
+      let resolved = false;
+
+      // 1. Start MQTT
       const client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
-        connectTimeout: 4000,
+        connectTimeout: timeoutSeconds * 1000,
         reconnectPeriod: 0,
       });
       mqttClientRef.current = client;
 
-      const mqttTimeout = setTimeout(() => {
-        if (client.connected) return;
-        console.log("MQTT timeout. Falling back to PeerJS...");
-        client.end();
-        mqttClientRef.current = null;
-        tryPeerJSHost(myName, roomName, roomId);
-      }, 4000);
+      // 2. Start PeerJS
+      const peer = new Peer(`nexroom-${roomId}`);
+      peerjsRef.current = peer;
 
+      const raceTimeout = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        console.log("Both MQTT and PeerJS timed out. Falling back to Manual...");
+        if (client) {
+          client.end();
+          if (mqttClientRef.current === client) mqttClientRef.current = null;
+        }
+        if (peer) {
+          peer.destroy();
+          if (peerjsRef.current === peer) peerjsRef.current = null;
+        }
+        tryManualHost(myName, roomName);
+      }, timeoutSeconds * 1000);
+
+      // MQTT handlers
       client.on("connect", () => {
-        clearTimeout(mqttTimeout);
-        console.log("MQTT connected successfully");
-        setSignalingMethod("mqtt");
+        if (resolved) {
+          client.end();
+          if (mqttClientRef.current === client) mqttClientRef.current = null;
+          return;
+        }
+        resolved = true;
+        clearTimeout(raceTimeout);
+        if (peer) {
+          peer.destroy();
+          if (peerjsRef.current === peer) peerjsRef.current = null;
+        }
+
+        console.log("MQTT won the signaling race!");
+        updateSignalingMethod("mqtt");
         client.subscribe(`webrtc-v3/${roomId}/knock`, { qos: 1 });
         client.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
         client.publish(`webrtc-v3/${roomId}/answer`, "", { qos: 1, retain: true });
+        setMyCode(roomId + "M");
         setPhase("in_room");
       });
 
@@ -415,10 +662,23 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           const msg = JSON.parse(msgStr);
           if (!msg || msg.senderId === selfId) return;
 
-          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-          pendingPCRef.current.set(msg.senderId, pc);
+          const isDuplicate = myName.toLowerCase() === msg.senderName.toLowerCase() || 
+            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === msg.senderName.toLowerCase());
 
+          if (isDuplicate) {
+            console.log(`Rejecting knock from ${msg.senderName} due to duplicate username.`);
+            const rejectPayload = {
+              error: "DUPLICATE_NAME",
+              senderId: selfId,
+            };
+            client.publish(`webrtc-v3/${roomId}/answer`, JSON.stringify(rejectPayload), { qos: 1, retain: true });
+            client.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
+            return;
+          }
+
+          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
           const tempConn: PeerConnection = { peerId: msg.senderId, peerName: msg.senderName, pc, dataChannels: new Map() };
+          pendingPCRef.current.set(msg.senderId, tempConn);
           createDataChannel(tempConn, "nexroom");
 
           const { sdp, candidates } = await gatherCandidates(pc, "answer", msg.sdp);
@@ -439,7 +699,183 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           client.publish(`webrtc-v3/${roomId}/answer`, JSON.stringify(answerPayload), { qos: 1, retain: true });
           client.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
 
-          const conn = wirePC(pc, msg.senderId, msg.senderName);
+          const conn = wirePC(pc, msg.senderId, msg.senderName, tempConn.dataChannels);
+          createDataChannel(conn, "nexroom");
+          pendingPCRef.current.delete(msg.senderId);
+
+          roomRef.current = {
+            ...roomRef.current!,
+            peers: [...(roomRef.current?.peers ?? []), { id: msg.senderId, name: msg.senderName }],
+          };
+          setRoom({ ...roomRef.current });
+        } catch (e) {
+          console.error("Error parsing knock offer:", e);
+        }
+      });
+
+      client.on("error", (err) => {
+        console.error("MQTT error:", err);
+        if (signalingMethodRef.current === null) {
+          client.end();
+          if (mqttClientRef.current === client) mqttClientRef.current = null;
+        }
+      });
+
+      // PeerJS handlers
+      peer.on("open", (id) => {
+        if (resolved) {
+          peer.destroy();
+          if (peerjsRef.current === peer) peerjsRef.current = null;
+          return;
+        }
+        resolved = true;
+        clearTimeout(raceTimeout);
+        if (client) {
+          client.end();
+          if (mqttClientRef.current === client) mqttClientRef.current = null;
+        }
+
+        console.log("PeerJS won the signaling race!");
+        updateSignalingMethod("peerjs");
+        setMyCode(roomId + "P");
+        setPhase("in_room");
+      });
+
+      peer.on("connection", (conn) => {
+        conn.on("open", () => {
+          const peerName = conn.metadata?.name || "Guest";
+          const isDuplicate = myName.toLowerCase() === peerName.toLowerCase() || 
+            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === peerName.toLowerCase());
+
+          if (isDuplicate) {
+            console.log(`Rejecting PeerJS connection from ${peerName} due to duplicate username.`);
+            conn.send(JSON.stringify({ moduleId: "system", event: "name_rejected", payload: { reason: "DUPLICATE_NAME" } }));
+            setTimeout(() => {
+              conn.close();
+            }, 500);
+            return;
+          }
+
+          const guestId = conn.peer.replace("nexroom-", "");
+          
+          const pc = conn.peerConnection;
+          const peerConnObj = wirePC(pc, guestId, peerName);
+          createDataChannel(peerConnObj, "nexroom");
+
+          roomRef.current = {
+            ...roomRef.current!,
+            peers: [...(roomRef.current?.peers ?? []), { id: guestId, name: peerName }],
+          };
+          setRoom({ ...roomRef.current });
+        });
+      });
+
+      peer.on("call", (call) => {
+        if (localStreamRef.current) {
+          call.answer(localStreamRef.current);
+        } else {
+          call.answer(new MediaStream());
+        }
+        call.on("stream", (remoteStream) => {
+          const guestId = call.peer.replace("nexroom-", "");
+          const existingPeer = peersRef.current.get(guestId);
+          if (existingPeer) {
+            existingPeer.stream = remoteStream;
+            peersRef.current.set(guestId, existingPeer);
+            updatePeers();
+          }
+        });
+      });
+
+      peer.on("error", (err) => {
+        console.error("PeerJS error:", err);
+        if (signalingMethodRef.current === null) {
+          peer.destroy();
+          if (peerjsRef.current === peer) peerjsRef.current = null;
+        }
+      });
+    } catch (e) {
+      console.error("Signaling race setup exception:", e);
+      tryManualHost(myName, roomName);
+    }
+  }
+
+  async function tryMQTTHost(myName: string, roomName: string, roomId: string, timeoutSeconds = 30) {
+    console.log("Attempting MQTT signaling...");
+    try {
+      initializeDummyStream();
+      const client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
+        connectTimeout: timeoutSeconds * 1000,
+        reconnectPeriod: 0,
+      });
+      mqttClientRef.current = client;
+
+      const mqttTimeout = setTimeout(() => {
+        if (client.connected) return;
+        console.log("MQTT timeout. Falling back to Manual...");
+        client.end();
+        mqttClientRef.current = null;
+        tryManualHost(myName, roomName);
+      }, timeoutSeconds * 1000);
+
+      client.on("connect", () => {
+        clearTimeout(mqttTimeout);
+        console.log("MQTT host connected successfully");
+        updateSignalingMethod("mqtt");
+        client.subscribe(`webrtc-v3/${roomId}/knock`, { qos: 1 });
+        client.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
+        client.publish(`webrtc-v3/${roomId}/answer`, "", { qos: 1, retain: true });
+        setMyCode(roomId + "M");
+        setPhase("in_room");
+      });
+
+      client.on("message", async (topic: string, payload: any) => {
+        if (!topic.endsWith("/knock")) return;
+        const msgStr = payload.toString();
+        if (!msgStr) return;
+
+        try {
+          const msg = JSON.parse(msgStr);
+          if (!msg || msg.senderId === selfId) return;
+
+          const isDuplicate = myName.toLowerCase() === msg.senderName.toLowerCase() || 
+            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === msg.senderName.toLowerCase());
+
+          if (isDuplicate) {
+            console.log(`Rejecting knock from ${msg.senderName} due to duplicate username.`);
+            const rejectPayload = {
+              error: "DUPLICATE_NAME",
+              senderId: selfId,
+            };
+            client.publish(`webrtc-v3/${roomId}/answer`, JSON.stringify(rejectPayload), { qos: 1, retain: true });
+            client.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
+            return;
+          }
+
+          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+          const tempConn: PeerConnection = { peerId: msg.senderId, peerName: msg.senderName, pc, dataChannels: new Map() };
+          pendingPCRef.current.set(msg.senderId, tempConn);
+          createDataChannel(tempConn, "nexroom");
+
+          const { sdp, candidates } = await gatherCandidates(pc, "answer", msg.sdp);
+
+          if (msg.candidates) {
+            for (const c of msg.candidates) {
+              await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+            }
+          }
+
+          const answerPayload = {
+            sdp,
+            candidates,
+            senderId: selfId,
+            senderName: myName,
+          };
+
+          client.publish(`webrtc-v3/${roomId}/answer`, JSON.stringify(answerPayload), { qos: 1, retain: true });
+          client.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
+
+          const conn = wirePC(pc, msg.senderId, msg.senderName, tempConn.dataChannels);
           createDataChannel(conn, "nexroom");
           pendingPCRef.current.delete(msg.senderId);
 
@@ -456,19 +892,19 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       client.on("error", (err) => {
         console.error("MQTT error:", err);
         clearTimeout(mqttTimeout);
-        if (signalingMethod === null) {
+        if (signalingMethodRef.current === null) {
           client.end();
           mqttClientRef.current = null;
-          tryPeerJSHost(myName, roomName, roomId);
+          tryManualHost(myName, roomName);
         }
       });
     } catch (e) {
       console.error("MQTT setup exception:", e);
-      tryPeerJSHost(myName, roomName, roomId);
+      tryManualHost(myName, roomName);
     }
   }
 
-  async function tryPeerJSHost(myName: string, roomName: string, roomId: string) {
+  async function tryPeerJSHost(myName: string, roomName: string, roomId: string, timeoutSeconds = 30) {
     console.log("Attempting PeerJS signaling...");
     try {
       const peer = new Peer(`nexroom-${roomId}`);
@@ -480,18 +916,31 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         peer.destroy();
         peerjsRef.current = null;
         tryManualHost(myName, roomName);
-      }, 5000);
+      }, timeoutSeconds * 1000);
 
       peer.on("open", (id) => {
         clearTimeout(peerTimeout);
         console.log("PeerJS host opened ID:", id);
-        setSignalingMethod("peerjs");
+        updateSignalingMethod("peerjs");
+        setMyCode(roomId + "P");
         setPhase("in_room");
       });
 
       peer.on("connection", (conn) => {
         conn.on("open", () => {
           const peerName = conn.metadata?.name || "Guest";
+          const isDuplicate = myName.toLowerCase() === peerName.toLowerCase() || 
+            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === peerName.toLowerCase());
+
+          if (isDuplicate) {
+            console.log(`Rejecting PeerJS connection from ${peerName} due to duplicate username.`);
+            conn.send(JSON.stringify({ moduleId: "system", event: "name_rejected", payload: { reason: "DUPLICATE_NAME" } }));
+            setTimeout(() => {
+              conn.close();
+            }, 500);
+            return;
+          }
+
           const guestId = conn.peer.replace("nexroom-", "");
           
           const pc = conn.peerConnection;
@@ -526,7 +975,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       peer.on("error", (err) => {
         console.error("PeerJS error:", err);
         clearTimeout(peerTimeout);
-        if (signalingMethod === null) {
+        if (signalingMethodRef.current === null) {
           peer.destroy();
           peerjsRef.current = null;
           tryManualHost(myName, roomName);
@@ -540,7 +989,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
 
   async function tryManualHost(myName: string, roomName: string) {
     console.log("Falling back to Manual WebRTC...");
-    setSignalingMethod("manual");
+    updateSignalingMethod("manual");
     const roomId = crypto.randomUUID().slice(0, 8);
     roomRef.current = { id: roomId, name: roomName, peers: [] };
     setRoom(roomRef.current);
@@ -551,9 +1000,8 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     try {
       const offerId = crypto.randomUUID().slice(0, 8);
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      pendingPCRef.current.set(offerId, pc);
-
       const tempConn: PeerConnection = { peerId: offerId, peerName: "", pc, dataChannels: new Map() };
+      pendingPCRef.current.set(offerId, tempConn);
       createDataChannel(tempConn, "nexroom");
 
       const { sdp, candidates } = await gatherCandidates(pc, "offer");
@@ -579,15 +1027,22 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       const payload = JSON.parse(decodeURIComponent(escape(atob(answerCode.trim()))));
       if (payload.type !== "answer") throw new Error("Expected an answer code.");
 
-      const [offerId, pc] = [...pendingPCRef.current.entries()][0] ?? [];
-      if (!pc) throw new Error("No pending connection found.");
+      const isDuplicate = myName.toLowerCase() === payload.fromName.toLowerCase() || 
+        Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === payload.fromName.toLowerCase());
+      if (isDuplicate) {
+        throw new Error("Username is already taken in this room. Please ask them to use a different name.");
+      }
+
+      const [offerId, pendingConn] = [...pendingPCRef.current.entries()][0] ?? [];
+      if (!pendingConn) throw new Error("No pending connection found.");
+      const pc = pendingConn.pc;
 
       await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
       for (const c of payload.candidates) {
         await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
       }
 
-      const conn = wirePC(pc, payload.fromId, payload.fromName);
+      const conn = wirePC(pc, payload.fromId, payload.fromName, pendingConn.dataChannels);
       createDataChannel(conn, "nexroom");
       pendingPCRef.current.delete(offerId);
 
@@ -605,45 +1060,84 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
 
   // ── Guest path ──────────────────────────────────────────────────────────────
 
-  async function startGuest(roomCode: string, myName: string) {
-    if (roomCode.length > 20) {
-      startManualGuest(roomCode, myName);
+  async function startGuest(roomCode: string, myName: string, preferredMethod: "auto" | "mqtt" | "peerjs" | "manual" = "auto", timeoutSeconds = 30) {
+    isHostRef.current = false;
+    let cleanCode = roomCode.trim();
+    let method = preferredMethod;
+
+    if (cleanCode.length > 20 && !cleanCode.includes("-")) {
+      startManualGuest(cleanCode, myName);
       return;
     }
 
-    const upperCode = roomCode.trim().toUpperCase();
+    if (cleanCode.includes("-")) {
+      const parts = cleanCode.split("-");
+      cleanCode = parts[0];
+      const suffix = parts[1].toLowerCase();
+      if (suffix === "mqtt" || suffix === "m") {
+        method = "mqtt";
+      } else if (suffix === "peerjs" || suffix === "p") {
+        method = "peerjs";
+      }
+    } else if (cleanCode.length === 7) {
+      const suffix = cleanCode.charAt(6).toLowerCase();
+      if (suffix === "m") {
+        method = "mqtt";
+        cleanCode = cleanCode.substring(0, 6);
+      } else if (suffix === "p") {
+        method = "peerjs";
+        cleanCode = cleanCode.substring(0, 6);
+      }
+    }
+
+    const upperCode = cleanCode.toUpperCase();
     setSelfName(myName);
     selfNameRef.current = myName;
     setPhase("gathering");
     setGatherError("");
 
+    if (method === "peerjs") {
+      tryPeerJSGuest(upperCode, myName, timeoutSeconds);
+      return;
+    }
+
+    if (method === "manual") {
+      startManualGuest(upperCode, myName);
+      return;
+    }
+
     try {
       initializeDummyStream();
       console.log("Guest attempting MQTT signaling for:", upperCode);
       const client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
-        connectTimeout: 4000,
+        connectTimeout: timeoutSeconds * 1000,
         reconnectPeriod: 0,
       });
       mqttClientRef.current = client;
 
       const mqttTimeout = setTimeout(() => {
         if (client.connected) return;
-        console.log("MQTT timeout. Falling back to PeerJS...");
         client.end();
         mqttClientRef.current = null;
-        tryPeerJSGuest(upperCode, myName);
-      }, 4000);
+        if (method === "auto") {
+          console.log("MQTT timeout. Falling back to PeerJS...");
+          tryPeerJSGuest(upperCode, myName, timeoutSeconds);
+        } else {
+          console.log("MQTT timeout. Falling back to Manual...");
+          setGatherError("Failed to connect via MQTT. Please use manual connection or try another method.");
+          setPhase("idle");
+        }
+      }, timeoutSeconds * 1000);
 
       client.on("connect", async () => {
         clearTimeout(mqttTimeout);
         console.log("MQTT connected successfully");
-        setSignalingMethod("mqtt");
+        updateSignalingMethod("mqtt");
         client.subscribe(`webrtc-v3/${upperCode}/answer`, { qos: 1 });
 
         const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        pendingPCRef.current.set("host", pc);
-
         const tempConn: PeerConnection = { peerId: "host", peerName: "", pc, dataChannels: new Map() };
+        pendingPCRef.current.set("host", tempConn);
         createDataChannel(tempConn, "nexroom");
 
         const { sdp, candidates } = await gatherCandidates(pc, "offer");
@@ -667,8 +1161,17 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           const msg = JSON.parse(msgStr);
           if (!msg || msg.senderId === selfId) return;
 
-          const pc = pendingPCRef.current.get("host");
-          if (!pc) return;
+          if (msg.error === "DUPLICATE_NAME") {
+            setGatherError("Username is already taken in this room. Please choose another name.");
+            setPhase("idle");
+            client.end();
+            if (mqttClientRef.current === client) mqttClientRef.current = null;
+            return;
+          }
+
+          const pendingConn = pendingPCRef.current.get("host");
+          if (!pendingConn) return;
+          const pc = pendingConn.pc;
 
           await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
 
@@ -685,9 +1188,10 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           };
           setRoom(roomRef.current);
 
-          const conn = wirePC(pc, msg.senderId, msg.senderName);
+          const conn = wirePC(pc, msg.senderId, msg.senderName, pendingConn.dataChannels);
           createDataChannel(conn, "nexroom");
           pendingPCRef.current.delete("host");
+          setMyCode(upperCode + "M");
           setPhase("in_room");
         } catch (e) {
           console.error("Error parsing answer:", e);
@@ -697,19 +1201,29 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       client.on("error", (err) => {
         console.error("MQTT guest error:", err);
         clearTimeout(mqttTimeout);
-        if (signalingMethod === null) {
+        if (signalingMethodRef.current === null) {
           client.end();
           mqttClientRef.current = null;
-          tryPeerJSGuest(upperCode, myName);
+          if (method === "auto") {
+            tryPeerJSGuest(upperCode, myName);
+          } else {
+            setGatherError("Failed to connect via MQTT. Please use manual connection or try another method.");
+            setPhase("idle");
+          }
         }
       });
     } catch (e) {
       console.error("MQTT guest exception:", e);
-      tryPeerJSGuest(upperCode, myName);
+      if (method === "auto") {
+        tryPeerJSGuest(upperCode, myName);
+      } else {
+        setGatherError("Failed to connect via MQTT. Please use manual connection or try another method.");
+        setPhase("idle");
+      }
     }
   }
 
-  async function tryPeerJSGuest(roomCode: string, myName: string) {
+  async function tryPeerJSGuest(roomCode: string, myName: string, timeoutSeconds = 30) {
     console.log("Guest attempting PeerJS signaling for room:", roomCode);
     try {
       const peer = new Peer();
@@ -722,15 +1236,29 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         peerjsRef.current = null;
         setGatherError("Failed to connect automatically. Please use manual code fallback.");
         setPhase("idle");
-      }, 5000);
+      }, timeoutSeconds * 1000);
 
       peer.on("open", (id) => {
         clearTimeout(peerTimeout);
         console.log("PeerJS guest opened successfully ID:", id);
-        setSignalingMethod("peerjs");
+        updateSignalingMethod("peerjs");
 
         const conn = peer.connect(`nexroom-${roomCode}`, {
           metadata: { name: myName }
+        });
+
+        conn.on("data", (dataStr: any) => {
+          try {
+            const msg = typeof dataStr === "string" ? JSON.parse(dataStr) : dataStr;
+            if (msg.moduleId === "system" && msg.event === "name_rejected") {
+              setGatherError("Username is already taken in this room. Please choose another name.");
+              setPhase("idle");
+              peer.destroy();
+              if (peerjsRef.current === peer) peerjsRef.current = null;
+            }
+          } catch (e) {
+            console.error("Error parsing peerjs data:", e);
+          }
         });
 
         conn.on("open", () => {
@@ -748,6 +1276,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             peers: [{ id: "host", name: "Host" }]
           };
           setRoom(roomRef.current);
+          setMyCode(roomCode + "P");
           setPhase("in_room");
         });
 
@@ -763,7 +1292,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       peer.on("error", (err) => {
         console.error("PeerJS guest error:", err);
         clearTimeout(peerTimeout);
-        if (signalingMethod === null) {
+        if (signalingMethodRef.current === null) {
           peer.destroy();
           peerjsRef.current = null;
           setGatherError("Automatic connection failed. Please use manual code.");
@@ -782,11 +1311,15 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     selfNameRef.current = myName;
     setPhase("gathering");
     setGatherError("");
-    setSignalingMethod("manual");
+    updateSignalingMethod("manual");
 
     try {
       const payload = JSON.parse(decodeURIComponent(escape(atob(offerCode.trim()))));
       if (payload.type !== "offer") throw new Error("Expected an invite code.");
+
+      if (myName.toLowerCase() === payload.fromName.toLowerCase()) {
+        throw new Error("Username is already taken in this room. Please choose another name.");
+      }
 
       roomRef.current = { id: payload.roomId, name: payload.roomName, peers: [{ id: payload.fromId, name: payload.fromName }] };
       setRoom(roomRef.current);
@@ -826,7 +1359,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     if (mqttClientRef.current) {
       try {
         const roomId = roomRef.current?.id;
-        if (roomId && signalingMethod === "mqtt") {
+        if (roomId && signalingMethodRef.current === "mqtt") {
           mqttClientRef.current.publish(`webrtc-v3/${roomId}/knock`, "", { qos: 1, retain: true });
           mqttClientRef.current.publish(`webrtc-v3/${roomId}/answer`, "", { qos: 1, retain: true });
         }
@@ -838,9 +1371,11 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       peerjsRef.current.destroy();
       peerjsRef.current = null;
     }
+    activeHeartbeats.current.forEach((hb) => clearInterval(hb.intervalId));
+    activeHeartbeats.current.clear();
     peersRef.current.forEach((c) => c.pc.close());
     peersRef.current.clear();
-    pendingPCRef.current.forEach((pc) => pc.close());
+    pendingPCRef.current.forEach((conn) => conn.pc.close());
     pendingPCRef.current.clear();
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
@@ -851,7 +1386,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     setPeers(new Map());
     setMyCode("");
     setPhase("idle");
-    setSignalingMethod(null);
+    updateSignalingMethod(null);
     setIsScreenSharing(false);
   }
 

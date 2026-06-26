@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useWebRTC } from "../../core/WebRTCContext";
 import type { ModuleProps } from "../../core/types";
-import { Play, Pause, Link, Users, Maximize } from "lucide-react";
+import { Play, Pause, Users, Maximize } from "lucide-react";
 
 type WPEvent =
   | { type: "load"; url: string }
@@ -46,6 +46,7 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
   const [duration, setDuration] = useState(0);
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const carouselRef = useRef<HTMLDivElement>(null);
 
   const suppressSync = useRef(false);
   const lastTimeRef = useRef(0);
@@ -266,64 +267,97 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
     });
   }, [onModuleEvent, selfId, getModuleState, syncModuleState]);
 
-  const [trendingVideos, setTrendingVideos] = useState<any[]>([]);
+  const defaultTrending = [
+    { title: "Lofi Hip Hop Radio - Beats to Relax/Study to", url: "https://www.youtube.com/watch?v=jfKfPfyJRdk", id: "jfKfPfyJRdk" },
+    { title: "NASA Live: Official ISS Space Station Stream - Earth Views from Orbit", url: "https://www.youtube.com/watch?v=x7WZzEaFk6s", id: "x7WZzEaFk6s" },
+    { title: "Marvel Studios' Avengers: Doomsday - Hall H Presentation Teaser", url: "https://www.youtube.com/watch?v=hA6hldpSTF8", id: "hA6hldpSTF8" },
+    { title: "Stunning 4K Nature Video: Relaxation Music with Birds Chirping", url: "https://www.youtube.com/watch?v=6jy0RpqJtJ4", id: "6jy0RpqJtJ4" },
+    { title: "Why WebRTC is Hard - A Technical Deep Dive", url: "https://www.youtube.com/watch?v=EsLookwz-P8", id: "EsLookwz-P8" },
+    { title: "MKBHD - Apple Vision Pro Review: The Apple Ecosystem", url: "https://www.youtube.com/watch?v=UvkgmyfQ33o", id: "UvkgmyfQ33o" },
+    { title: "How I Built a Serverless App in 2026", url: "https://www.youtube.com/watch?v=T3yZkS_c98I", id: "T3yZkS_c98I" },
+    { title: "Interstellar - No Time For Caution (Docking Scene OST 4K)", url: "https://www.youtube.com/watch?v=m3zvVGJRtDk", id: "m3zvVGJRtDk" }
+  ];
+
+  const [trendingVideos, setTrendingVideos] = useState<any[]>(defaultTrending);
   const [isLoadingTrending, setIsLoadingTrending] = useState(false);
 
-  const defaultTrending = [
-    { title: "ALPHA | Official Trailer - Alia Bhatt, Sharvari, Bobby Deol, Anil Kapoor | YRF Spy Universe", url: "https://www.youtube.com/watch?v=QRqGwGWo1Y0", id: "QRqGwGWo1Y0" },
-    { title: "LE SSERAFIM x ILLIT x KATSEYE - 'ICONIC BY MISTAKE' Official Music Video", url: "https://www.youtube.com/watch?v=27C4pfRsf9g", id: "27C4pfRsf9g" },
-    { title: "SPIDER-MAN: BRAND NEW DAY | Official Trailer - Tom Holland, Zendaya, Sadie Sink", url: "https://www.youtube.com/watch?v=aqz-KE-BPKQ", id: "aqz-KE-BPKQ" },
-    { title: "NASA Live: Official ISS Space Station Stream - Earth Views from Orbit", url: "https://www.youtube.com/watch?v=x7WZzEaFk6s", id: "x7WZzEaFk6s" }
-  ];
+  const scrollLeft = () => {
+    if (carouselRef.current) {
+      carouselRef.current.scrollBy({ left: -240, behavior: "smooth" });
+    }
+  };
+
+  const scrollRight = () => {
+    if (carouselRef.current) {
+      carouselRef.current.scrollBy({ left: 240, behavior: "smooth" });
+    }
+  };
 
   // Fetch trending videos on mount
   useEffect(() => {
+    let active = true;
     async function fetchTrending() {
       setIsLoadingTrending(true);
-      try {
-        const res = await fetch("https://trendgetter.vercel.app/api/youtube/videos?regionCode=US&maxResults=10");
-        if (!res.ok) throw new Error("API response not OK");
-        const body = await res.json();
-        const data = body.data;
-        if (Array.isArray(data) && data.length >= 4) {
-          const formatted = data.map((v: any) => {
-            // Trendgetter API has id directly as the video ID
-            let id = v.id || v.videoId;
-            if (!id && v.url) {
-              const matches = v.url.match(/v=([^&]+)/) || v.url.match(/vi\/([^?]+)/);
-              id = matches ? matches[1] : "";
-            }
-            return {
-              title: v.title || "Trending Video",
-              channel: (v.channel_title || v.channelTitle || "").toLowerCase(),
-              description: (v.description || "").toLowerCase(),
-              url: `https://www.youtube.com/watch?v=${id}`,
-              id: id
-            };
-          }).filter(v => {
-            // Filter out videos that are highly likely to have embed restrictions
-            // e.g. VEVO music channels, auto-generated topics, official music videos (licensing blocks)
-            if (!v.id) return false;
-            if (v.channel.includes("vevo") || v.channel.includes("topic")) return false;
-            if (v.title.toLowerCase().includes("music video") || v.title.toLowerCase().includes("official mv")) return false;
-            if (v.description.includes("provided to youtube") || v.description.includes("released on:")) return false;
-            return true;
-          });
+      const instances = [
+        "https://invidious.flokinet.to",
+        "https://invidious.nerdvpn.de",
+        "https://inv.vern.cc",
+        "https://invidious.privacydev.net",
+        "https://iv.ggtyler.dev",
+        "https://vid.puffyan.us",
+        "https://yewtu.be"
+      ];
 
-          if (formatted.length >= 4) {
-            setTrendingVideos(formatted.slice(0, 4));
-            return;
+      for (const instance of instances) {
+        if (!active) return;
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          
+          const res = await fetch(`${instance}/api/v1/trending`, { 
+            signal: controller.signal 
+          });
+          clearTimeout(timeoutId);
+
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (active && Array.isArray(data) && data.length >= 4) {
+            const formatted = data.map((v: any) => {
+              const id = v.videoId || v.id || "";
+              return {
+                title: v.title || "Trending Video",
+                channel: (v.author || v.channelTitle || "").toLowerCase(),
+                description: (v.description || "").toLowerCase(),
+                url: `https://www.youtube.com/watch?v=${id}`,
+                id: id
+              };
+            }).filter(v => {
+              if (!v.id) return false;
+              const ch = v.channel || "";
+              const title = (v.title || "").toLowerCase();
+              if (ch.includes("vevo") || ch.includes("topic")) return false;
+              if (title.includes("music video") || title.includes("official mv")) return false;
+              return true;
+            });
+
+            if (formatted.length >= 4) {
+              setTrendingVideos(formatted.slice(0, 12));
+              setIsLoadingTrending(false);
+              return;
+            }
           }
+        } catch (err) {
+          console.warn(`Failed to fetch trending from ${instance}:`, err);
         }
-        setTrendingVideos(defaultTrending);
-      } catch (err) {
-        console.warn("Failed to fetch trending videos from API, using static default trending:", err);
-        setTrendingVideos(defaultTrending);
-      } finally {
+      }
+      if (active) {
         setIsLoadingTrending(false);
       }
     }
     fetchTrending();
+    return () => {
+      active = false;
+    };
   }, []);
 
   function sendPlayerCommand(func: string, ...args: any[]) {
@@ -378,7 +412,7 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
     if (playerRef.current && playerRef.current.destroy) {
       try {
         playerRef.current.destroy();
-      } catch (_) {}
+      } catch (_) { }
       playerRef.current = null;
       playerReadyRef.current = false;
     }
@@ -437,11 +471,10 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
       <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto pr-3">
         {/* URL input */}
         <div className="flex gap-2">
-          <div className="flex-1 relative">
-            <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <div className="flex-1">
             <input
-              type="url"
-              className="w-full pl-8"
+              type="text"
+              className="w-full"
               placeholder="Paste YouTube URL…"
               value={inputUrl}
               onChange={(e) => setInputUrl(e.target.value)}
@@ -478,9 +511,9 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
                     }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/50" />
-                  
+
                   {/* Clean play button overlay */}
-                  <button 
+                  <button
                     onClick={play}
                     className="relative z-10 w-16 h-16 flex items-center justify-center rounded-full bg-primary hover:bg-primary-hover text-white shadow-lg hover:scale-110 active:scale-95 transition-all duration-300 group"
                   >
@@ -537,48 +570,71 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
               <p className="text-sm font-semibold text-white">Paste a YouTube URL above to start a watch party</p>
               <p className="text-xs opacity-60">Play/pause/seek syncs to all peers in the room</p>
             </div>
-            
-            <div className="w-full max-w-2xl border-t border-border/40 pt-6 flex flex-col gap-3">
-              <p className="text-xs font-bold text-muted uppercase tracking-wider text-center mb-2">
+
+            <div className="w-full max-w-xl border-t border-border/40 pt-4 flex flex-col gap-2 mx-auto overflow-hidden">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-wider text-center mb-2">
                 Or pick a quick recommendation:
               </p>
-              <div className="grid grid-cols-2 gap-3">
-                {trendingVideos.map((rec) => (
-                  <button
-                    key={rec.url}
-                    onClick={() => {
-                      setInputUrl(rec.url);
-                      setVideoId(rec.id);
-                      setVideoUrl(rec.url);
-                      playerReadyRef.current = false;
-                      setDuration(0);
-                      setCurrentTime(0);
-                      sendModuleEvent("load", { type: "load", url: rec.url } as WPEvent);
-                      savePartyState({ videoUrl: rec.url, videoId: rec.id, isPlaying: false, time: 0 });
-                    }}
-                    className="group w-full text-left bg-surface/30 hover:bg-surface/60 border border-border/50 hover:border-accent/80 rounded-xl overflow-hidden transition-all flex flex-col hover:scale-[1.02]"
+              
+              {trendingVideos.length > 0 && (
+                <div className="relative flex items-center group/carousel w-full">
+                  {/* Left scroll button */}
+                  <button 
+                    onClick={scrollLeft}
+                    className="absolute -left-2 z-10 p-1.5 rounded-full bg-surface/90 hover:bg-surface border border-border/50 text-muted hover:text-white transition-all active:scale-90 hover:scale-105 shadow-lg select-none opacity-0 group-hover/carousel:opacity-100 font-mono text-xs shrink-0"
+                    title="Scroll Left"
                   >
-                    {/* Thumbnail Image Container */}
-                    <div className="w-full aspect-video bg-black relative overflow-hidden shrink-0 border-b border-border/20">
-                      <img 
-                        src={`https://img.youtube.com/vi/${rec.id}/mqdefault.jpg`} 
-                        alt={rec.title} 
-                        className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=320&auto=format&fit=crop&q=60";
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-black/15 group-hover:bg-black/0 transition-colors" />
-                    </div>
-                    {/* Title Text Area */}
-                    <div className="p-2.5 flex-1 flex flex-col justify-center">
-                      <p className="text-xs font-semibold text-white line-clamp-2 leading-relaxed group-hover:text-accent transition-colors">
-                        {rec.title}
-                      </p>
-                    </div>
+                    &larr;
                   </button>
-                ))}
-              </div>
+
+                  {/* Scroll Container */}
+                  <div 
+                    ref={carouselRef}
+                    className="flex-1 flex gap-3 overflow-x-auto scrollbar-none py-1 scroll-smooth px-1"
+                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                  >
+                    {trendingVideos.map((video) => (
+                      <button
+                        key={video.id}
+                        onClick={() => {
+                          setInputUrl(video.url);
+                          setVideoId(video.id);
+                          setVideoUrl(video.url);
+                          playerReadyRef.current = false;
+                          setDuration(0);
+                          setCurrentTime(0);
+                          sendModuleEvent("load", { type: "load", url: video.url } as WPEvent);
+                          savePartyState({ videoUrl: video.url, videoId: video.id, isPlaying: false, time: 0 });
+                        }}
+                        className="flex-shrink-0 w-32 text-left group transition-all"
+                      >
+                        <div className="w-full aspect-video bg-black relative overflow-hidden rounded-lg border border-border/40 group-hover:border-accent/60 transition-all shadow-md">
+                          <img
+                            src={`https://img.youtube.com/vi/${video.id}/mqdefault.jpg`}
+                            alt={video.title}
+                            className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=320&auto=format&fit=crop&q=60";
+                            }}
+                          />
+                        </div>
+                        <p className="text-[10px] font-bold text-white line-clamp-2 mt-1.5 group-hover:text-accent transition-colors leading-tight h-7 overflow-hidden">
+                          {video.title}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Right scroll button */}
+                  <button 
+                    onClick={scrollRight}
+                    className="absolute -right-2 z-10 p-1.5 rounded-full bg-surface/90 hover:bg-surface border border-border/50 text-muted hover:text-white transition-all active:scale-90 hover:scale-105 shadow-lg select-none opacity-0 group-hover/carousel:opacity-100 font-mono text-xs shrink-0"
+                    title="Scroll Right"
+                  >
+                    &rarr;
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -1,8 +1,32 @@
+const TURN_USERNAME = "YOUR_METERED_USERNAME";
+const TURN_CREDENTIAL = "YOUR_METERED_CREDENTIAL";
+
 export const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
   { urls: "stun:stun2.l.google.com:19302" },
   { urls: "stun:stun3.l.google.com:19302" },
+  { urls: "stun:openrelay.metered.ca:80" },
+  {
+    urls: "turn:openrelay.metered.ca:80?transport=udp",
+    username: TURN_USERNAME,
+    credential: TURN_CREDENTIAL,
+  },
+  {
+    urls: "turn:openrelay.metered.ca:80?transport=tcp",
+    username: TURN_USERNAME,
+    credential: TURN_CREDENTIAL,
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    username: TURN_USERNAME,
+    credential: TURN_CREDENTIAL,
+  },
+  {
+    urls: "turns:openrelay.metered.ca:443?transport=tcp",
+    username: TURN_USERNAME,
+    credential: TURN_CREDENTIAL,
+  },
 ];
 
 export interface SignalPayload {
@@ -50,7 +74,7 @@ export async function gatherCandidates(
       if (e.candidate) {
         candidates.push(e.candidate.toJSON());
         clearTimeout(timer);
-        timer = setTimeout(resolve, 1500); // settle 1.5 s after last candidate
+        timer = setTimeout(resolve, 2000); // settle 2.0 s after last candidate
       } else {
         clearTimeout(timer);
         resolve(); // null candidate = gathering complete
@@ -59,8 +83,9 @@ export async function gatherCandidates(
     pc.onicegatheringstatechange = () => {
       if (pc.iceGatheringState === "complete") { clearTimeout(timer); resolve(); }
     };
-    setTimeout(resolve, 8000); // hard 8 s timeout
+    setTimeout(resolve, 12000); // hard 12 s timeout
   });
 
   return { sdp: pc.localDescription!, candidates };
 }
+

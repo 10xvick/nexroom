@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useWebRTC } from "../core/WebRTCContext";
-import { Copy, Plus, LogIn, Loader2, CheckCircle2, ArrowLeft, Link, Code2 } from "lucide-react";
+import { Copy, Plus, LogIn, Loader2, CheckCircle2, ArrowLeft, Code2 } from "lucide-react";
 
 function CopyBtn({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -35,77 +35,62 @@ function CodeBox({ code, label }: { code: string; label: string }) {
   );
 }
 
-function inviteUrl(code: string, method: string | null) {
-  if (method === "manual") {
-    return `${window.location.origin}${window.location.pathname}#i=${encodeURIComponent(code)}`;
-  }
-  return `${window.location.origin}${window.location.pathname}#r=${encodeURIComponent(code)}`;
-}
-
 export default function Lobby() {
   const { phase, myCode, gatherError, signalingMethod, startHost, startGuest, completeHandshake } = useWebRTC();
 
   const [name, setName] = useState(localStorage.getItem("nexroom_name") || "");
-  const [roomName, setRoomName] = useState("");
+  const [roomName, setRoomName] = useState(() => {
+    const savedName = localStorage.getItem("nexroom_name") || "";
+    return savedName.trim() ? `${savedName.trim()}'s Room` : "";
+  });
   const [answerInput, setAnswerInput] = useState("");
-  const [view, setView] = useState<"home" | "create" | "join_url" | "join_manual">("home");
-  const [showRawCode, setShowRawCode] = useState(false);
-  const [pendingOfferCode, setPendingOfferCode] = useState("");
-  const [pendingRoomName, setPendingRoomName] = useState("");
   const [manualOfferInput, setManualOfferInput] = useState("");
-  const autoStarted = useRef(false);
+  const [preferredMethod, setPreferredMethod] = useState<"auto" | "mqtt" | "peerjs" | "manual">("auto");
+  const [isRoomNameDirty, setIsRoomNameDirty] = useState(false);
+  const [timeoutSec, setTimeoutSec] = useState(30);
 
   function saveName(n: string) { 
     localStorage.setItem("nexroom_name", n); 
     setName(n); 
   }
 
-  // ── Detect invite URL on mount ───────────────────────────────────────────────
-  useEffect(() => {
-    const match = window.location.hash.match(/[#&]i=([^&]+)/);
-    if (match) {
-      const code = decodeURIComponent(match[1]);
-      setPendingOfferCode(code);
-      setPendingRoomName("Manual Room Invite");
-      setView("join_url");
-      window.history.replaceState(null, "", window.location.pathname);
-      return;
+  function handleNameChange(newName: string) {
+    saveName(newName);
+    if (!isRoomNameDirty) {
+      setRoomName(newName.trim() ? `${newName.trim()}'s Room` : "");
     }
+  }
 
-    const rMatch = window.location.hash.match(/[#&]r=([^&]+)/);
-    if (rMatch) {
-      const code = decodeURIComponent(rMatch[1]);
-      setPendingOfferCode(code);
-      setPendingRoomName(`Room Code: ${code}`);
-      setView("join_url");
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-  }, []);
+  function handleRoomNameChange(newRoomName: string) {
+    setIsRoomNameDirty(true);
+    setRoomName(newRoomName);
+  }
 
-  // ── Auto-join when name is set in URL-invite view ───────────────────────────
-  useEffect(() => {
-    if (view === "join_url" && pendingOfferCode && name.trim() && !autoStarted.current && phase === "idle") {
-      autoStarted.current = true;
-      startGuest(pendingOfferCode, name.trim());
+  function handlePasteInputChange(val: string) {
+    const trimmed = val.trim();
+    if (trimmed.length <= 10) {
+      setManualOfferInput(trimmed.toUpperCase());
+    } else {
+      setManualOfferInput(trimmed);
     }
-  }, [name, view, pendingOfferCode, phase]);
+  }
+
+
 
   async function handleCreate() {
     if (!name.trim()) return;
-    await startHost(name.trim(), roomName.trim() || `${name.trim()}'s Room`);
+    await startHost(name.trim(), roomName.trim() || `${name.trim()}'s Room`, preferredMethod, timeoutSec);
   }
 
   async function handleJoin() {
     if (!name.trim() || !manualOfferInput.trim()) return;
-    await startGuest(manualOfferInput.trim(), name.trim());
+    await startGuest(manualOfferInput.trim(), name.trim(), preferredMethod, timeoutSec);
   }
 
   async function handleComplete() {
     if (!answerInput.trim()) return;
     await completeHandshake(answerInput.trim());
   }
-
-  const url = myCode ? inviteUrl(myCode, signalingMethod) : "";
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-between p-6 bg-bg">
@@ -132,32 +117,20 @@ export default function Lobby() {
         {/* ── offer_ready: host shares manual invite link ── */}
         {phase === "offer_ready" && signalingMethod === "manual" && (
           <div className="glass rounded-2xl p-6 space-y-5 w-full">
-            <p className="text-sm font-semibold text-white">Step 1 — Send this invite link</p>
-            <p className="text-xs text-muted">Share the link via any channel. When they open it, their answer code will be generated automatically.</p>
+            <p className="text-sm font-semibold text-white">Step 1 — Send this invite code</p>
+            <p className="text-xs text-muted">Copy the invite code below and send it to the host or peer you want to connect with.</p>
 
-            <div className="flex items-center gap-2 bg-black/30 rounded-lg px-3 py-2 border border-accent/20">
-              <Link size={13} className="text-accent shrink-0" />
-              <span className="text-xs text-accent truncate flex-1">{url}</span>
-              <CopyBtn text={url} label="Copy Link" />
-            </div>
-
-            <button
-              onClick={() => setShowRawCode(!showRawCode)}
-              className="flex items-center gap-1.5 text-xs text-muted hover:text-white transition-colors"
-            >
-              <Code2 size={12} /> {showRawCode ? "Hide" : "Trouble with link? Use raw code instead"}
-            </button>
-            {showRawCode && <CodeBox code={myCode} label="Raw invite code" />}
+            <CodeBox code={myCode} label="Invite code" />
 
             <hr className="border-border" />
-            <p className="text-sm font-semibold text-white">Step 2 — Paste their answer code</p>
-            <p className="text-xs text-muted">After they open your link, they'll see an answer code. Paste it here to connect.</p>
+            <p className="text-sm font-semibold text-white">Step 2 — Enter their answer code</p>
+            <p className="text-xs text-muted">After they import your invite code, they will generate an answer code. Enter it below to connect.</p>
             
             <div className="space-y-3">
               <textarea 
                 rows={3} 
                 className="w-full font-mono text-xs resize-none"
-                placeholder="Paste answer code here…"
+                placeholder="Enter answer code here…"
                 value={answerInput} 
                 onChange={(e) => setAnswerInput(e.target.value)} 
               />
@@ -179,7 +152,7 @@ export default function Lobby() {
             {signalingMethod === "manual" ? (
               <>
                 <p className="text-sm font-semibold text-white">Send this answer code back</p>
-                <p className="text-xs text-muted">Copy this and send it back to the person who shared the invite link.</p>
+                <p className="text-xs text-muted">Copy this and send it back to the host.</p>
                 <CodeBox code={myCode} label="Your answer code" />
               </>
             ) : (
@@ -196,108 +169,129 @@ export default function Lobby() {
           </div>
         )}
 
-        {/* ── join_url: guest opened invite link, needs name ── */}
-        {phase === "idle" && view === "join_url" && (
-          <div className="glass rounded-2xl p-6 space-y-4 w-full">
-            <p className="text-sm font-semibold text-white">
-              You're invited to join <span className="text-accent">{pendingRoomName}</span>
-            </p>
-            <div>
-              <label className="text-xs text-muted mb-1.5 block">Your Name</label>
-              <input 
-                type="text" 
-                className="w-full" 
-                placeholder="Enter your display name"
-                value={name} 
-                onChange={(e) => saveName(e.target.value)} 
-                maxLength={32}
-                autoFocus 
-              />
+        {/* ── unified setup screen ── */}
+        {phase === "idle" && (
+          <div className="space-y-6 w-full">
+            {/* Nickname input at the top */}
+            <div className="glass rounded-2xl p-5 space-y-3">
+              <div>
+                <label className="text-xs text-muted mb-1.5 block font-semibold">Your Display Name</label>
+                <input 
+                  type="text" 
+                  className="w-full text-sm font-semibold" 
+                  placeholder="Enter nickname..."
+                  value={name} 
+                  onChange={(e) => handleNameChange(e.target.value)} 
+                  maxLength={15} 
+                />
+              </div>
             </div>
-            {gatherError && <p className="text-xs text-danger">{gatherError}</p>}
-            <button 
-              className="btn-primary w-full justify-center"
-              onClick={() => { autoStarted.current = true; startGuest(pendingOfferCode, name.trim()); }}
-              disabled={!name.trim()}
-            >
-              <LogIn size={16} /> Join Room
-            </button>
-            <button onClick={() => setView("home")} className="text-xs text-muted hover:text-white w-full text-center">← Back</button>
-          </div>
-        )}
 
-        {/* ── home ── */}
-        {phase === "idle" && view === "home" && (
-          <div className="glass rounded-2xl p-6 space-y-4 w-full">
-            <div>
-              <label className="text-xs text-muted mb-1.5 block">Your Name</label>
-              <input 
-                type="text" 
-                className="w-full" 
-                placeholder="Enter your display name"
-                value={name} 
-                onChange={(e) => saveName(e.target.value)} 
-                maxLength={32} 
-              />
-            </div>
-            <hr className="border-border" />
-            <button className="btn-primary w-full justify-center" onClick={() => setView("create")} disabled={!name.trim()}>
-              <Plus size={16} /> Create Room
-            </button>
-            <button 
-              className="btn-ghost w-full justify-center border-accent/30 text-accent hover:bg-accent/10"
-              onClick={() => setView("join_manual")} 
-              disabled={!name.trim()}
-            >
-              <Code2 size={16} /> Join Room / Code
-            </button>
-          </div>
-        )}
+            {gatherError && (
+              <div className="bg-danger/10 border border-danger/20 rounded-xl p-3.5 text-xs text-danger font-semibold text-center animate-fade-in">
+                {gatherError}
+              </div>
+            )}
 
-        {/* ── create ── */}
-        {phase === "idle" && view === "create" && (
-          <div className="glass rounded-2xl p-6 space-y-4 w-full">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setView("home")} className="text-muted hover:text-white"><ArrowLeft size={16} /></button>
-              <p className="text-sm font-semibold text-white">Create a Room</p>
-            </div>
-            <div>
-              <label className="text-xs text-muted mb-1.5 block">Room Name</label>
-              <input 
-                type="text" 
-                className="w-full" 
-                placeholder={`${name.trim()}'s Room`}
-                value={roomName} 
-                onChange={(e) => setRoomName(e.target.value)} 
-              />
-            </div>
-            <p className="text-xs text-muted">A room code or manual link will be generated automatically to share with your peer.</p>
-            {gatherError && <p className="text-xs text-danger">{gatherError}</p>}
-            <button className="btn-primary w-full justify-center" onClick={handleCreate}>
-              <Plus size={16} /> Create Room
-            </button>
-          </div>
-        )}
+            {/* Split layout: Host a Room (Create) and Join a Room (Join) */}
+            <div className="flex flex-col gap-6">
+              {/* Host Section */}
+              <div className="glass rounded-2xl p-5 space-y-4 border border-border/40">
+                <div className="flex items-center gap-2 border-b border-border/30 pb-2">
+                  <Plus size={16} className="text-accent" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">Host a Room</span>
+                </div>
 
-        {/* ── join manual (supports 6-character room codes AND base64 manual strings) ── */}
-        {phase === "idle" && view === "join_manual" && (
-          <div className="glass rounded-2xl p-6 space-y-4 w-full">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setView("home")} className="text-muted hover:text-white"><ArrowLeft size={16} /></button>
-              <p className="text-sm font-semibold text-white">Join a Room</p>
+                <div>
+                  <label className="text-xs text-muted mb-1.5 block">Room Title</label>
+                  <input 
+                    type="text" 
+                    className="w-full text-sm" 
+                    placeholder="e.g. Brainstorming"
+                    value={roomName} 
+                    onChange={(e) => handleRoomNameChange(e.target.value)} 
+                    maxLength={32}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs text-muted block font-medium">Protocol Config</label>
+                  <div className="grid grid-cols-4 gap-1 bg-black/25 p-1 rounded-lg border border-border/40">
+                    {(["auto", "mqtt", "peerjs", "manual"] as const).map((method) => (
+                      <button
+                        key={method}
+                        type="button"
+                        onClick={() => setPreferredMethod(method)}
+                        className={`py-1 text-[10px] font-bold rounded transition-all uppercase ${
+                          preferredMethod === method
+                            ? "bg-accent text-bg shadow-sm"
+                            : "text-muted hover:text-white"
+                        }`}
+                      >
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[9px] text-muted leading-relaxed">
+                    {preferredMethod === "auto" && "Auto: Races MQTT & PeerJS brokers in parallel (recommended)."}
+                    {preferredMethod === "mqtt" && "MQTT: Connects using explicit MQTT broker only."}
+                    {preferredMethod === "peerjs" && "PeerJS: Connects using explicit PeerJS broker only."}
+                    {preferredMethod === "manual" && "Manual: Offline copy-paste connection (no external brokers)."}
+                  </p>
+
+                  {preferredMethod !== "manual" && (
+                    <div className="flex items-center justify-between pt-1.5 border-t border-border/20 mt-2">
+                      <label className="text-[10px] text-muted font-medium">Signaling Timeout (sec)</label>
+                      <input
+                        type="number"
+                        min={5}
+                        max={120}
+                        className="w-16 text-center text-xs py-0.5 px-1 bg-black/30 border border-border/40 rounded text-white"
+                        value={timeoutSec}
+                        onChange={(e) => setTimeoutSec(Math.max(5, parseInt(e.target.value) || 30))}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  className="btn-primary w-full justify-center text-sm font-semibold py-2.5 mt-2" 
+                  onClick={handleCreate} 
+                  disabled={!name.trim()}
+                >
+                  Create & Launch Room
+                </button>
+              </div>
+
+              {/* Join Section */}
+              <div className="glass rounded-2xl p-5 space-y-4 border border-border/40">
+                <div className="flex items-center gap-2 border-b border-border/30 pb-2">
+                  <LogIn size={16} className="text-accent" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">Join a Room</span>
+                </div>
+
+                <div className="space-y-2">
+                  <textarea 
+                    rows={2} 
+                    className="w-full font-mono text-xs resize-none"
+                    placeholder="Enter Room Code (e.g. UDOYL5P) or Manual Invite Code..."
+                    value={manualOfferInput} 
+                    onChange={(e) => handlePasteInputChange(e.target.value)} 
+                  />
+                  <p className="text-[9px] text-muted leading-relaxed">
+                    For automated rooms, enter the 7-character Room Code (capital letters only). For offline manual rooms, paste the full invite code.
+                  </p>
+                </div>
+
+                <button 
+                  className="btn-ghost w-full justify-center border-accent/30 text-accent hover:bg-accent/10 text-sm font-semibold py-2.5 mt-2" 
+                  onClick={handleJoin} 
+                  disabled={!name.trim() || !manualOfferInput.trim()}
+                >
+                  Connect & Join
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-muted">Enter a 6-character Room Code, or paste a manual invite code if using offline fallback.</p>
-            <textarea 
-              rows={5} 
-              className="w-full font-mono text-xs resize-none"
-              placeholder="Paste Room Code (e.g. A3B89C) or manual invite string here…"
-              value={manualOfferInput} 
-              onChange={(e) => setManualOfferInput(e.target.value)} 
-            />
-            {gatherError && <p className="text-xs text-danger">{gatherError}</p>}
-            <button className="btn-primary w-full justify-center" onClick={handleJoin} disabled={!manualOfferInput.trim()}>
-              <LogIn size={16} /> Connect
-            </button>
           </div>
         )}
       </div>

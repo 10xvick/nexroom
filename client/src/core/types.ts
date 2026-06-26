@@ -78,4 +78,5 @@ export interface PeerConnection {
   pc: RTCPeerConnection;
   dataChannels: Map<string, RTCDataChannel>;
   stream?: MediaStream;
+  reconnecting?: boolean;
 }

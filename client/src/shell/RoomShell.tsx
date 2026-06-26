@@ -6,11 +6,12 @@ import { Copy, Users, LogOut, MessageSquare } from "lucide-react";
 import ChatModule from "../modules/chat/ChatModule";
 
 export default function RoomShell() {
-  const { room, selfId, selfName, peers, leaveRoom, sendModuleEvent, onModuleEvent } = useWebRTC();
+  const { room, selfId, selfName, peers, leaveRoom, sendModuleEvent, onModuleEvent, myCode, signalingMethod } = useWebRTC();
   const modules = getAllModules();
   const [activeModuleId, setActiveModuleId] = useState(modules[0]?.id ?? "");
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [showPeers, setShowPeers] = useState(false);
 
   // Universal Side Chat Layout State
@@ -52,7 +53,7 @@ export default function RoomShell() {
   }, []);
 
   const sendReaction = useCallback((emoji: string) => {
-    sendModuleEvent("system", "reaction", { emoji });
+    sendModuleEvent("reactions", "reaction", { emoji });
     spawnReaction(emoji);
   }, [sendModuleEvent, spawnReaction]);
 
@@ -86,7 +87,7 @@ export default function RoomShell() {
   // Listen for global reactions
   useEffect(() => {
     return onModuleEvent((env) => {
-      if (env.moduleId === "system" && env.event === "reaction") {
+      if (env.moduleId === "reactions" && env.event === "reaction") {
         const payload = env.payload as any;
         if (payload && payload.emoji) {
           spawnReaction(payload.emoji);
@@ -107,10 +108,12 @@ export default function RoomShell() {
 
   const activeModule = modules.find((m) => m.id === activeModuleId);
 
-  function copyRoomId() {
-    if (room) navigator.clipboard.writeText(room.id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  function copyRoomCode() {
+    const code = myCode || room?.id;
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
   }
 
   const sendForModule = useCallback(
@@ -152,21 +155,79 @@ export default function RoomShell() {
         </div>
       )}
 
-      {/* Top Bar */}
-      <header className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-surface/80 backdrop-blur-sm">
-        <div className="text-lg font-bold text-accent mr-1">⬡</div>
+      {showInviteModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md animate-fade-in">
+          <div className="glass w-[360px] max-w-[90%] rounded-2xl p-6 border border-border/80 flex flex-col gap-5 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-border/30 pb-3">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Invite Participants</h3>
+              <button 
+                onClick={() => setShowInviteModal(false)}
+                className="text-muted hover:text-white transition-colors text-lg font-bold"
+              >
+                ×
+              </button>
+            </div>
 
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white truncate">{room.name}</p>
-          <p className="text-xs text-muted font-mono">Room Code: {room.id}</p>
+            <div className="space-y-4">
+              <div className="space-y-2 bg-surface/30 p-4 rounded-xl border border-border/20">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">Room Code</span>
+                  <button 
+                    onClick={copyRoomCode}
+                    className="text-[10px] btn-primary py-1 px-2.5 font-bold flex items-center gap-1"
+                  >
+                    {copiedCode ? "✓ Copied" : "Copy Code"}
+                  </button>
+                </div>
+                <div className="font-mono text-lg font-bold text-accent bg-black/40 rounded px-2.5 py-2 border border-border/40 select-all tracking-wider text-center">
+                  {myCode || room.id}
+                </div>
+                <p className="text-[11px] text-muted leading-relaxed">
+                  Share this 7-character room code with your friends. They can enter it in the "Room Code" field on the setup screen to join the room.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button 
+                className="btn-ghost px-5 py-2 text-xs font-bold" 
+                onClick={() => setShowInviteModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top Bar */}
+      <header className="flex items-center gap-3 px-4 py-1.5 border-b border-border bg-surface/80 backdrop-blur-sm">
+        <div className="text-sm font-bold text-accent mr-1">⬡</div>
+
+        <div className="flex-1 min-w-0 flex items-center gap-4">
+          <p className="text-xs font-bold text-white truncate max-w-[200px]" title={room.name}>{room.name}</p>
+          {signalingMethod !== "manual" && (
+            <>
+              <p className="text-xs text-muted font-mono select-none">
+                Room Code: <span className="text-accent/80 font-bold">{myCode || room.id}</span>
+              </p>
+              <button 
+                onClick={() => setShowInviteModal(true)}
+                className="text-[10px] text-accent border border-accent/20 hover:border-accent/40 bg-accent/5 hover:bg-accent/15 px-2 py-0.5 rounded font-bold transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+              >
+                Invite
+              </button>
+            </>
+          )}
+          {signalingMethod === "manual" && (
+            <p className="text-xs text-muted font-mono select-none">
+              Direct Offline Session
+            </p>
+          )}
         </div>
 
-        <button className="btn-ghost py-1.5 px-2.5 text-xs gap-1" onClick={copyRoomId}>
-          {copied ? "✓ Copied" : <><Copy size={12} /> Share</>}
-        </button>
-
         <button
-          className="btn-ghost py-1.5 px-2.5 text-xs gap-1 relative"
+          className="btn-ghost py-1 px-2 text-xs gap-1 relative"
           onClick={() => setShowPeers(!showPeers)}
         >
           <Users size={12} />
@@ -182,8 +243,11 @@ export default function RoomShell() {
                 </div>
                 {Array.from(peers.values()).map((p) => (
                   <div key={p.peerId} className="flex items-center gap-2 text-xs text-white">
-                    <div className="w-2 h-2 rounded-full bg-accent" />
-                    {p.peerName}
+                    <div className={`w-2 h-2 rounded-full ${p.reconnecting ? "bg-yellow-500 animate-pulse" : "bg-accent"}`} />
+                    <span>
+                      {p.peerName}
+                      {p.reconnecting && <span className="text-yellow-500 text-[10px] ml-1.5">(reconnecting...)</span>}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -192,7 +256,7 @@ export default function RoomShell() {
         </button>
 
         <button
-          className={`btn-ghost py-1.5 px-2.5 text-xs gap-1 ${isChatOpen ? "bg-accent/20 border border-accent/40 text-accent" : ""}`}
+          className={`btn-ghost py-1 px-2 text-xs gap-1 ${isChatOpen ? "bg-accent/20 border border-accent/40 text-accent" : ""}`}
           onClick={() => setIsChatOpen(!isChatOpen)}
           title="Toggle chat panel"
         >
@@ -200,7 +264,7 @@ export default function RoomShell() {
           <span>Chat</span>
         </button>
 
-        <button className="btn-danger py-1 px-2.5" onClick={() => setShowLeaveConfirm(true)} title="Leave room">
+        <button className="btn-danger py-1 px-2 text-xs" onClick={() => setShowLeaveConfirm(true)} title="Leave room">
           <LogOut size={14} />
         </button>
       </header>
