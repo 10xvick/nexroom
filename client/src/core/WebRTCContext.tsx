@@ -1027,7 +1027,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       const payload = JSON.parse(decodeURIComponent(escape(atob(answerCode.trim()))));
       if (payload.type !== "answer") throw new Error("Expected an answer code.");
 
-      const isDuplicate = myName.toLowerCase() === payload.fromName.toLowerCase() || 
+      const isDuplicate = selfName.toLowerCase() === payload.fromName.toLowerCase() || 
         Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === payload.fromName.toLowerCase());
       if (isDuplicate) {
         throw new Error("Username is already taken in this room. Please ask them to use a different name.");
