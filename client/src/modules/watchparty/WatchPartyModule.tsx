@@ -139,24 +139,32 @@ export default function WatchPartyModule({ selfId, selfName, peers, sendModuleEv
     };
   }, []);
 
-  // ── Poll playback time from YouTube Player ─────────────────────────────────
+  // ── Poll playback time and duration from YouTube Player ─────────────────────
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (isPlaying) {
+    if (videoId) {
       interval = setInterval(() => {
-        if (!isDragging.current && playerRef.current && playerRef.current.getCurrentTime) {
+        if (playerRef.current) {
           try {
-            const time = playerRef.current.getCurrentTime();
-            if (typeof time === "number") {
-              lastTimeRef.current = time;
-              setCurrentTime(time);
+            if (playerRef.current.getDuration) {
+              const dur = playerRef.current.getDuration();
+              if (typeof dur === "number" && dur > 0) {
+                setDuration(dur);
+              }
             }
-          } catch (_) { }
+            if (isPlaying && !isDragging.current && playerRef.current.getCurrentTime) {
+              const time = playerRef.current.getCurrentTime();
+              if (typeof time === "number") {
+                lastTimeRef.current = time;
+                setCurrentTime(time);
+              }
+            }
+          } catch (_) {}
         }
-      }, 250);
+      }, 333);
     }
     return () => clearInterval(interval);
-  }, [isPlaying]);
+  }, [videoId, isPlaying]);
 
   // ── Periodic state synchronization ──────────────────────────────────────────
   useEffect(() => {
