@@ -663,7 +663,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           if (!msg || msg.senderId === selfId) return;
 
           const isDuplicate = myName.toLowerCase() === msg.senderName.toLowerCase() || 
-            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === msg.senderName.toLowerCase());
+            Array.from(peersRef.current.values()).some((p) => p.peerId !== msg.senderId && p.peerName.toLowerCase() === msg.senderName.toLowerCase());
 
           if (isDuplicate) {
             console.log(`Rejecting knock from ${msg.senderName} due to duplicate username.`);
@@ -744,8 +744,9 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       peer.on("connection", (conn) => {
         conn.on("open", () => {
           const peerName = conn.metadata?.name || "Guest";
+          const guestId = conn.peer.replace("nexroom-", "");
           const isDuplicate = myName.toLowerCase() === peerName.toLowerCase() || 
-            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === peerName.toLowerCase());
+            Array.from(peersRef.current.values()).some((p) => p.peerId !== guestId && p.peerName.toLowerCase() === peerName.toLowerCase());
 
           if (isDuplicate) {
             console.log(`Rejecting PeerJS connection from ${peerName} due to duplicate username.`);
@@ -755,8 +756,6 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             }, 500);
             return;
           }
-
-          const guestId = conn.peer.replace("nexroom-", "");
           
           const pc = conn.peerConnection;
           const peerConnObj = wirePC(pc, guestId, peerName);
@@ -839,7 +838,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
           if (!msg || msg.senderId === selfId) return;
 
           const isDuplicate = myName.toLowerCase() === msg.senderName.toLowerCase() || 
-            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === msg.senderName.toLowerCase());
+            Array.from(peersRef.current.values()).some((p) => p.peerId !== msg.senderId && p.peerName.toLowerCase() === msg.senderName.toLowerCase());
 
           if (isDuplicate) {
             console.log(`Rejecting knock from ${msg.senderName} due to duplicate username.`);
@@ -929,8 +928,9 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       peer.on("connection", (conn) => {
         conn.on("open", () => {
           const peerName = conn.metadata?.name || "Guest";
+          const guestId = conn.peer.replace("nexroom-", "");
           const isDuplicate = myName.toLowerCase() === peerName.toLowerCase() || 
-            Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === peerName.toLowerCase());
+            Array.from(peersRef.current.values()).some((p) => p.peerId !== guestId && p.peerName.toLowerCase() === peerName.toLowerCase());
 
           if (isDuplicate) {
             console.log(`Rejecting PeerJS connection from ${peerName} due to duplicate username.`);
@@ -940,8 +940,6 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             }, 500);
             return;
           }
-
-          const guestId = conn.peer.replace("nexroom-", "");
           
           const pc = conn.peerConnection;
           const peerConnObj = wirePC(pc, guestId, peerName);
@@ -1028,7 +1026,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
       if (payload.type !== "answer") throw new Error("Expected an answer code.");
 
       const isDuplicate = selfName.toLowerCase() === payload.fromName.toLowerCase() || 
-        Array.from(peersRef.current.values()).some((p) => p.peerName.toLowerCase() === payload.fromName.toLowerCase());
+        Array.from(peersRef.current.values()).some((p) => p.peerId !== payload.fromId && p.peerName.toLowerCase() === payload.fromName.toLowerCase());
       if (isDuplicate) {
         throw new Error("Username is already taken in this room. Please ask them to use a different name.");
       }
